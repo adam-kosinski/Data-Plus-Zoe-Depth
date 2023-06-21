@@ -47,6 +47,28 @@ COMMON_CONFIG = {
 }
 
 DATASETS_CONFIG = {
+    "canatree100": {
+        "dataset": "canatree100",
+        "avoid_boundary": False,
+        "min_depth": 1e-3,   # originally 0.1
+        "max_depth": 20000,
+        "data_path": "/content/drive/MyDrive/0. Duke/Data+/CanaTree100/images/",
+        "gt_path": "/content/drive/MyDrive/0. Duke/Data+/CanaTree100/images_depth/",
+        "input_height": 720,
+        "input_width": 1280,
+        "data_path_eval": "/content/drive/MyDrive/0. Duke/Data+/CanaTree100/images/",
+        "gt_path_eval": "/content/drive/MyDrive/0. Duke/Data+/CanaTree100/images_depth/",
+        "min_depth_eval": 1e-3,
+        "max_depth_eval": 20000,
+        "min_depth_diff": -20000,
+        "max_depth_diff": 20000,
+
+        "do_random_rotate": True,
+        "degree": 1.0,
+        "do_kb_crop": False,
+        "garg_crop": False,
+        "eigen_crop": True
+    },
     "kitti": {
         "dataset": "kitti",
         "min_depth": 0.001,
