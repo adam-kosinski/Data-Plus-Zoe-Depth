@@ -28,6 +28,7 @@ from zoedepth.utils.arg_utils import parse_unknown
 from zoedepth.trainers.builder import get_trainer
 from zoedepth.models.builder import build_model
 from zoedepth.data.data_mono import MixedNYUKITTI
+from zoedepth.data.data_mono import DepthDataLoader
 import torch.utils.data.distributed
 import torch.multiprocessing as mp
 import torch
@@ -100,8 +101,8 @@ def main_worker(gpu, ngpus_per_node, config):
         config.total_params = total_params
         print(f"Total parameters : {total_params}")
 
-        train_loader = MixedNYUKITTI(config, "train").data
-        test_loader = MixedNYUKITTI(config, "online_eval").data
+        train_loader = DepthDataLoader(config, "train").data
+        test_loader = DepthDataLoader(config, "online_eval").data
 
         trainer = get_trainer(config)(
             config, model, train_loader, test_loader, device=config.gpu)
