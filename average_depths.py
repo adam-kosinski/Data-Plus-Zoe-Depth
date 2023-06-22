@@ -102,12 +102,7 @@ if __name__ == '__main__':
 
     avg, norm = get_average(files, bbox_file, args.median)
 
-    sd = np.ma.std(norm, axis=0)
-    plt.imshow(avg, interpolation='nearest', cmap='binary')
-    # plt.imshow(sd, interpolation='nearest', cmap='rainbow', alpha=0.8)
-    manager = plt.get_current_fig_manager()
-    manager.window.showMaximized()
-    plt.show()
+    show(np.round(avg))
 
 
     # plt.axis('off')
