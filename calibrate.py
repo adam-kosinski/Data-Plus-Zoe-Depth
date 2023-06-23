@@ -104,4 +104,6 @@ print(slope, intercept)
 calib_data = data * slope + intercept
 calib_data = np.maximum(np.zeros(calib_data.shape), calib_data)
 os.makedirs("./calibrated", exist_ok=True)
-Image.fromarray((calib_data * 256).astype(np.uint16)).save("./calibrated/" + os.path.basename(args.raw_filename))
+fpath_out = "./calibrated/" + os.path.basename(args.raw_filename)
+Image.fromarray((calib_data * 256).astype(np.uint16)).save(fpath_out)
+print("Saved calibrated image to " + fpath_out)

@@ -8,7 +8,7 @@ def putDist(data, img, x, y, index=0, label=""):
     bgr_color=(0,0,255)
     font = cv2.FONT_HERSHEY_SIMPLEX
     text = " " + str(round(data[y][x], 2)) + "m" + "  " + label
-    cv2.rectangle(img, (x + 15, y - 10 + 30*index), (x + 120, y + 30 + 30*index), (255, 255, 255), -1)
+    cv2.rectangle(img, (x + 15, y - 10 + 30*index), (x + 140, y + 30 + 30*index), (255, 255, 255), -1)
     cv2.putText(img, text, (x,y + 20 + 30*index), font, 1, bgr_color, 2)
     cv2.circle(img, (x,y), 6, bgr_color, 2)
 

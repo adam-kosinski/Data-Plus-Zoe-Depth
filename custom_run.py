@@ -28,6 +28,8 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 zoe = model_zoe_nk.to(DEVICE)
 
 for file in os.listdir(args.input_dir):
+    if not os.path.isfile(args.input_dir + "/" + file):
+        continue
     print("Doing inference on " + file)
 
     with Image.open(args.input_dir + "/" + file).convert("RGB") as image:
