@@ -75,20 +75,20 @@ DATASETS_CONFIG = {
         "dataset": "lowview",
         "avoid_boundary": False,
         "min_depth": 1e-3, 
-        "max_depth": 20000,
-        "data_path": "/content/drive/MyDrive/Data+/",
-        "gt_path": "/content/drive/MyDrive/Data+/",
+        "max_depth": 255,
+        "data_path": "/content/drive/MyDrive/Data+/lowview/",
+        "gt_path": "/content/drive/MyDrive/Data+/lowview/",
         "filenames_file": "./train_test_inputs/lowview_train_files_with_gt.txt",
-        "input_height": 720,
-        "input_width": 1280,
-        "data_path_eval": "/content/drive/MyDrive/Data+/",
-        "gt_path_eval": "/content/drive/MyDrive/Data+/",
+        "input_height": 480,
+        "input_width": 640,
+        "data_path_eval": "/content/drive/MyDrive/Data+/lowview/",
+        "gt_path_eval": "/content/drive/MyDrive/Data+/lowview/",
         "filenames_file_eval": "./train_test_inputs/lowview_test_files_with_gt.txt",
         
         "min_depth_eval": 1e-3,
-        "max_depth_eval": 20000,
-        "min_depth_diff": -20000,
-        "max_depth_diff": 20000,
+        "max_depth_eval": 255,
+        "min_depth_diff": -255,
+        "max_depth_diff": 255,
         
         "do_random_rotate": True,
         "degree": 1.0,
@@ -96,7 +96,7 @@ DATASETS_CONFIG = {
         "garg_crop": False,
         "eigen_crop": True
         
-        }
+    },
     "kitti": {
         "dataset": "kitti",
         "min_depth": 0.001,
