@@ -70,7 +70,33 @@ DATASETS_CONFIG = {
         "do_kb_crop": False,
         "garg_crop": False,
         "eigen_crop": True
-    },
+    }, 
+    "lowview": {
+        "dataset": "lowview",
+        "avoid_boundary": False,
+        "min_depth": 1e-3, 
+        "max_depth": 20000,
+        "data_path": "/content/drive/MyDrive/Data+/",
+        "gt_path": "/content/drive/MyDrive/Data+/",
+        "filenames_file": "./train_test_inputs/lowview_train_files_with_gt.txt",
+        "input_height": 720,
+        "input_width": 1280,
+        "data_path_eval": "/content/drive/MyDrive/Data+/",
+        "gt_path_eval": "/content/drive/MyDrive/Data+/",
+        "filenames_file_eval": "./train_test_inputs/lowview_test_files_with_gt.txt",
+        
+        "min_depth_eval": 1e-3,
+        "max_depth_eval": 20000,
+        "min_depth_diff": -20000,
+        "max_depth_diff": 20000,
+        
+        "do_random_rotate": True,
+        "degree": 1.0,
+        "do_kb_crop": False,
+        "garg_crop": False,
+        "eigen_crop": True
+        
+        }
     "kitti": {
         "dataset": "kitti",
         "min_depth": 0.001,
@@ -399,7 +425,7 @@ def get_config(model_name, mode='train', dataset=None, **overwrite_kwargs):
     check_choices("Model", model_name, ["zoedepth", "zoedepth_nk"])
     check_choices("Mode", mode, ["train", "infer", "eval"])
     if mode == "train":
-        check_choices("Dataset", dataset, ["nyu", "kitti", "mix", "canatree100", None])
+        check_choices("Dataset", dataset, ["nyu", "kitti", "mix", "canatree100","lowview", None])
 
     config = flatten({**COMMON_CONFIG, **COMMON_TRAINING_CONFIG})
     config = update_model_config(config, mode, model_name)
