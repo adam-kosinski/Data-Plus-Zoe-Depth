@@ -32,6 +32,7 @@ parser.add_argument('raw_filename')
 parser.add_argument('-c', '--colored_filename')
 parser.add_argument('-a', '--all', action='store_true')
 parser.add_argument('-r', '--round', action='store_true')
+parser.add_argument('-t', '--true_depth', action='store_true')
 args = parser.parse_args()
 
 colored_filename = None
@@ -42,7 +43,9 @@ print("colored_filename", colored_filename)
 
 with Image.open(args.raw_filename) as img:
     data = np.asarray(img)
-    data = data / 256   # undo the scaling that was used when storing the image
+    if not args.true_depth:
+        data = data / 256   # undo the scaling that was used when storing the image
+    print(data.shape)
     if args.round:
         data = np.round(data)
     

@@ -13,8 +13,8 @@ if not os.path.exists("./histograms"):
     os.makedirs("./histograms")
 
 for file in os.listdir(args.directory):
-    if not file.endswith("_raw.png"):
-        continue
+    # if not file.endswith("_raw.png"):
+    #     continue
 
     print(file)
 
