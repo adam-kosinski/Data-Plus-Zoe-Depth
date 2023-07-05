@@ -92,14 +92,6 @@ class MainWindow(QMainWindow):
 
 
 
-# how to convert numpy depth data to a pixmap
-
-# qt_image = ImageQt(Image.fromarray(data))
-# pixmap = QPixmap.fromImage(qt_image).scaledToWidth(400)
-
-
-
-
 
 
 if __name__ == '__main__':

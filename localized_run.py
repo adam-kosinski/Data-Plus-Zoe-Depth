@@ -35,6 +35,10 @@ else:
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 zoe = model_zoe_nk.to(DEVICE)
 
+# create output dir if necessary
+if not os.path.exists("./output"):
+    os.makedirs("./output")
+
 
 for file in os.listdir(args.input_dir):
     if not os.path.isfile(args.input_dir + "/" + file):
@@ -51,10 +55,11 @@ for file in os.listdir(args.input_dir):
                 continue
             for detection in img_data['detections']:
                 if detection['conf'] > 0.2:
+                    print("conf", detection['conf'])
                     if not bboxs:
                         bboxs = []
                     bboxs.append(detection['bbox'])
-                    print("bboxs", bboxs)
+            print("bboxs", bboxs)
             break
         if not bboxs:
             print("Couldn't find megadetector detections")
@@ -64,7 +69,7 @@ for file in os.listdir(args.input_dir):
         print("Processing whole image")
         if args.depth_dir:
             for f in os.listdir(args.depth_dir):
-                if not os.path.splitext(file)[0] + "_raw" in f:
+                if not os.path.splitext(file)[0] + "_raw.png" == os.path.basename(f):
                     continue
                 with Image.open(os.path.join(args.depth_dir, f)) as depth_img:
                     depth = np.asarray(depth_img) / 256
@@ -74,59 +79,64 @@ for file in os.listdir(args.input_dir):
         
 
         print("Processing animal area")
-        # TODO support multiple animals (don't just use index 0 of bboxs)
-        # TODO don't assume padding not cut off when doing mask
         
+        for i in range(len(bboxs)):
+            print(f"Animal {i}")
 
-        # resize bounding box
-        w, h = img.size
-        b = {
-            'x': int(bboxs[0][0] * w),
-            'y': int(bboxs[0][1] * h),
-            'width': int(bboxs[0][2] * w),
-            'height': int(bboxs[0][3] * h)
-        }
-        padding = 150
-        padded_box = (
-            max(0, b['x'] - padding),
-            max(0, b['y'] - padding),
-            min(w, b['x'] + b['width'] + padding),
-            min(h, b['y'] + b['height'] + padding)
-        )
-        local_img = img.crop(padded_box)
+            # resize bounding box
+            w, h = img.size
+            b = {
+                'x': int(bboxs[i][0] * w),
+                'y': int(bboxs[i][1] * h),
+                'width': int(bboxs[i][2] * w),
+                'height': int(bboxs[i][3] * h)
+            }
+            padding = 150
+            padded_box = (
+                max(0, b['x'] - padding),
+                max(0, b['y'] - padding),
+                min(w, b['x'] + b['width'] + padding),
+                min(h, b['y'] + b['height'] + padding)
+            )
+            local_img = img.crop(padded_box)
 
-        # do inference
-        local_depth = zoe.infer_pil(local_img)
+            # do inference
+            local_depth = zoe.infer_pil(local_img)
 
-        # align the depths using the padding area
-        local_mask = np.zeros(local_depth.shape, dtype='bool')
-        local_mask[padding:padding+b['height'], padding:padding+b['width']] = True
-        global_mask = np.ones(depth.shape, dtype='bool')
-        global_mask[padded_box[1]:padded_box[3], padded_box[0]:padded_box[2]] = local_mask
-        L = local_depth[~local_mask]
-        D = depth[~global_mask]
+            # get copy of global depth
+            depth_copy = depth.copy()
 
-        local_depth = ((local_depth - L.mean()) / L.std()) * D.std() + D.mean()
-        local_depth = np.maximum(local_depth, 0)
+            # align the depths using the padding area
+            local_mask = np.zeros(local_depth.shape, dtype='bool')
+            b_offset = {
+                'top': b['y'] - padded_box[1],
+                'bottom': b['y'] + b['height'] - padded_box[1],
+                'left': b['x'] - padded_box[0],
+                'right': b['x'] + b['width'] - padded_box[0]
+            }
+            local_mask[b_offset['top']:b_offset['bottom'], b_offset['left']:b_offset['right']] = True
+            global_mask = np.ones(depth.shape, dtype='bool')
+            global_mask[padded_box[1]:padded_box[3], padded_box[0]:padded_box[2]] = local_mask
+            L = local_depth[~local_mask]
+            D = depth_copy[~global_mask]
 
-        # paste local depth onto bigger depth map
-        depth[padded_box[1]:padded_box[3], padded_box[0]:padded_box[2]] = local_depth
+            local_depth = ((local_depth - L.mean()) / L.std()) * D.std() + D.mean()
+            local_depth = np.maximum(local_depth, 0)
 
+            # paste local depth onto bigger depth map
+            depth_copy[padded_box[1]:padded_box[3], padded_box[0]:padded_box[2]] = local_depth
 
-        print("inference done, saving")
+            # save
+            save_filename_base = "./output/" + os.path.splitext(file)[0] + ("" if i==0 else f"_{i}")
 
-        # create output dir if necessary
-        if not os.path.exists("./output"):
-            os.makedirs("./output")
+            # save raw
+            from zoedepth.utils.misc import save_raw_16bit
+            fpath = save_filename_base + "_raw.png"
+            save_raw_16bit(depth_copy, fpath)
 
-        # save raw
-        from zoedepth.utils.misc import save_raw_16bit
-        fpath = "./output/" + os.path.splitext(file)[0] + "_raw.png"
-        save_raw_16bit(depth, fpath)
+            # save colored output
+            colored = colorize(depth_copy)
+            fpath_colored = save_filename_base + "_colored.png"
+            Image.fromarray(colored).save(fpath_colored)
 
-        # save colored output
-        colored = colorize(depth)
-        fpath_colored = "./output/" + os.path.splitext(file)[0] + "_colored.png"
-        Image.fromarray(colored).save(fpath_colored)
-
-print("Done")
+print("\nDone")
