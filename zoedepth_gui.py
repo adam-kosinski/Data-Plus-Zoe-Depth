@@ -15,6 +15,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QImage, QPixmap
 
+base_dir = os.path.dirname(__file__)
+
 class ResultSignal(QObject):
     result = pyqtSignal(object)
 
@@ -23,10 +25,15 @@ class BuildZoeModel(QRunnable):
         super().__init__()
         self.signals = ResultSignal()
     def run(self):
-        model_zoe_nk = torch.hub.load(".", "ZoeD_NK", source="local", pretrained=True, config_mode="eval")
-        DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-        zoe = model_zoe_nk.to(DEVICE)
-        self.signals.result.emit(zoe)
+        try:
+            model_zoe_nk = torch.hub.load(base_dir, "ZoeD_NK", source="local", pretrained=True, config_mode="eval")
+            DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+            zoe = model_zoe_nk.to(DEVICE)
+            self.signals.result.emit(zoe)
+        except:
+            import traceback
+            traceback.print_exc()
+        
 
 class ZoeWorker(QRunnable):
     def __init__(self, zoe, rgb_filename):
