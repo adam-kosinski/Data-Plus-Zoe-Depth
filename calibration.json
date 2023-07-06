@@ -1,0 +1,7 @@
+{
+    "third_cropped": {
+        "relative_depth_map": "third_results/RCNX0020_raw.png",
+        "slope": 0.7816590697505711,
+        "intercept": -1.4722765358062602
+    }
+}
