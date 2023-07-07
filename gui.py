@@ -5,6 +5,9 @@ import math
 from PIL import Image
 from PIL.ImageQt import ImageQt
 
+from zoedepth.utils.misc import colorize
+
+
 from PyQt6.QtCore import QSize, Qt, QRunnable, QThreadPool, QObject, pyqtSignal, QPoint
 from PyQt6.QtWidgets import QApplication, QMainWindow, QFileDialog, QLabel, QPushButton
 from PyQt6.QtGui import QImage, QPixmap
@@ -27,9 +30,12 @@ class MainWindow(QMainWindow):
 
         # temp
         self.open_root_folder()
-        with Image.open("second_results/RCNX0332_raw.png") as raw_img:
+        with Image.open("second_results/calibrated/RCNX0332_raw.png") as raw_img:
             self.data = np.asarray(raw_img) / 256
         with Image.open("second_results/RCNX0332_colored.png") as img:
+            rounded = np.floor(self.data)
+            colored = colorize(rounded)
+            img = Image.fromarray(colored)
             qt_depthmap = ImageQt(img)
             self.pixmap = QPixmap.fromImage(qt_depthmap).scaledToWidth(400)
             self.imgDisplay.setPixmap(self.pixmap)
@@ -43,10 +49,7 @@ class MainWindow(QMainWindow):
         y = math.floor(self.data.shape[0] * e.position().y() / rect.height())
         depth_val = round(self.data[y][x], 1)
 
-        display = self.meterDisplay
         box = self.meterContainer
-
-        # display.setText(f"{depth_val} m")
         dest = box.parentWidget().mapFromGlobal(e.globalPosition())
         box.move(int(dest.x()) + 20, int(dest.y()) + 10)
         self.meterDisplay.setText(f"{depth_val} m ")
