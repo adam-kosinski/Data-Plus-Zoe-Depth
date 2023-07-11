@@ -12,6 +12,7 @@ from PyQt6.QtCore import QSize, Qt, QRunnable, QThreadPool, QObject, pyqtSignal,
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
+    QHBoxLayout,
     QFileDialog,
     QLabel,
     QPushButton,
@@ -22,18 +23,18 @@ from PyQt6.QtWidgets import (
     QGraphicsEllipseItem,
     QLineEdit
 )
-from PyQt6.QtGui import QPixmap, QPen, QPainter
+from PyQt6.QtGui import QPixmap, QPen, QPainter, QDoubleValidator
 from PyQt6 import uic
 
 
-# TODO
-# when pop widget from calibration lists, delete the widget too, maybe something like this:
-# import sip
-# layout.removeWidget(self.widget_name)
-# sip.delete(self.widget_name)
 
-# implement itemChange event for points, so they drag together, and to avoid dragging out of bounds
+# TODO
+# implement itemChange event for points, to avoid dragging out of bounds
 # https://stackoverflow.com/questions/3548254/restrict-movable-area-of-qgraphicsitem
+
+# figure out flow for opening new image and loading the depth display, pixmap stuff, label saying loading
+
+# abstract all the calibration stuff to a class in a different file (class CalibrationManager)
 
 
 
@@ -52,6 +53,77 @@ def depth_to_pixmap(depth, rescale_width = None):
     
 
 
+class CalibrationEntry:
+    def __init__(self, x, y, distance, scene, vbox, entry_list):
+        # note that some signals (remove button, finished editing, etc will be dealt with by the code using this class)
+
+        # references
+        self.scene = scene
+        self.entry_list = entry_list
+
+        # point
+        self.point = QGraphicsEllipseItem(-5, -5, 10, 10)   # scene coords, -5 offset so center is at item coords 0,0
+        self.point.setPos(x, y)
+        self.point.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
+        self.point.mousePressEvent = lambda e: self.focus()
+        scene.addItem(self.point)
+
+        # add list entry
+        self.line_edit = QLineEdit()
+        self.line_edit.setPlaceholderText("enter distance (m)")
+        validator = QDoubleValidator()
+        validator.setBottom(0.0)
+        validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        self.line_edit.setValidator(validator)
+        self.line_edit.focusInEvent = self.line_edit_focused
+        self.line_edit.focusOutEvent = self.line_edit_unfocused
+        self.line_edit.editingFinished.connect(self.unfocus)
+        self.delete_button = QPushButton("Remove")
+        
+        self.hbox = QHBoxLayout()
+        self.hbox.addWidget(self.line_edit)
+        self.hbox.addWidget(self.delete_button)
+        vbox.addLayout(self.hbox)
+
+        if distance:
+            self.line_edit.setText(distance)
+            self.unfocus()
+        else:
+            self.focus()
+    
+    def focus(self):
+        self.line_edit.setFocus()   # this will trigger the point being highlighted too
+
+    def line_edit_focused(self, e):
+        QLineEdit.focusInEvent(self.line_edit, e)
+        self.highlight_point()
+    
+    def line_edit_unfocused(self, e):
+        QLineEdit.focusOutEvent(self.line_edit, e)
+        self.unfocus()
+    
+    def highlight_point(self):
+        for entry in self.entry_list:
+            if entry != self:
+                entry.unfocus()
+        fat_pen = QPen(Qt.GlobalColor.red)
+        fat_pen.setWidth(3)
+        self.point.setPen(fat_pen)
+    
+    def unfocus(self):
+        thin_pen = QPen(Qt.GlobalColor.red)
+        self.point.setPen(thin_pen)
+        self.line_edit.clearFocus()
+    
+    def remove(self):
+        # remove point
+        self.point.scene().removeItem(self.point)
+
+        # remove list hbox
+        clear_layout_contents(self.hbox)
+        self.hbox.parent().removeItem(self.hbox)
+
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -63,7 +135,6 @@ class MainWindow(QMainWindow):
         self.referenceGraphicsView.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         self.deploymentGrid.setColumnStretch(1, 1)
-        self.calibrationGrid.setColumnStretch(0, 1)
 
         # temp
         self.open_root_folder()
@@ -116,12 +187,9 @@ class MainWindow(QMainWindow):
         self.screens.setCurrentWidget(self.calibrationScreen)
 
     def init_calibration_image(self, fpath):
-        clear_layout_contents(self.calibrationGrid)
-        self.calibration_img_points = []
-        self.calibration_depth_points = []
-        self.calibration_line_edits = []
-        self.prev_calibration_point_valid = True
-
+        clear_layout_contents(self.calibrationList)
+        self.calibration_entries = []
+        
         # make scenes and assign to views
         ref_scene = QGraphicsScene(0,0,400,200)
         self.referenceGraphicsScene = ref_scene
@@ -131,86 +199,84 @@ class MainWindow(QMainWindow):
         depth_scene = QGraphicsScene(0,0,400,200)
         self.depthGraphicsScene = depth_scene
         depth_view = self.depthGraphicsView
-        depth_view.setScene(depth_scene)
+        depth_view.setScene(ref_scene)
 
-        # display pixmaps and set up event listeners
-        pixmap = QPixmap(fpath).scaledToWidth(400, mode=Qt.TransformationMode.SmoothTransformation)
-        pixmap_item = QGraphicsPixmapItem(pixmap)
-        pixmap_item.mousePressEvent = lambda e: self.add_calibration_point(e.pos().x(), e.pos().y())
-        ref_scene.addItem(pixmap_item)
+        # display pixmap background
+        ref_pixmap = QPixmap(fpath).scaledToWidth(400, mode=Qt.TransformationMode.SmoothTransformation)
+        self.ref_pixmap = ref_pixmap
+        with Image.open("second_results/RCNX0332_raw.png") as raw_img:
+            self.rel_depth = np.asarray(raw_img) / 256
+        depth_pixmap = depth_to_pixmap(self.rel_depth, rescale_width=400)
 
-        ref_view.setMinimumSize(pixmap.width(), pixmap.height())
-        depth_view.setMinimumSize(pixmap.width(), pixmap.height())
+        self.set_background(ref_view, ref_pixmap)
+        self.set_background(depth_view, depth_pixmap)
+
+        # sizing
+        ref_view.setMinimumSize(ref_pixmap.width(), ref_pixmap.height())
+        depth_view.setMinimumSize(ref_pixmap.width(), ref_pixmap.height())
+
+        # event listeners
+        ref_scene.mousePressEvent = self.scene_mouse_press
+
+    def set_background(self, graphics_view, pixmap):
+        graphics_view.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate) # this gets rid of weird artifacts when items move around, due to update region calculations missing like half a pixel
+        graphics_view.drawBackground = lambda painter, rect: painter.drawPixmap(rect, pixmap, rect)
+        graphics_view.scene().update()
+
+    def scene_mouse_press(self, e):
+        pos = e.scenePos()
+        QGraphicsScene.mousePressEvent(self.referenceGraphicsScene , e)
+        if e.isAccepted():
+            return
+        self.add_calibration_entry(pos.x(), pos.y())
 
 
-    def add_calibration_point(self, x, y, distance=None):
-        print(x,y)
-        if not self.prev_calibration_point_valid:
-            self.calibration_img_points.pop()
-            self.calibration_depth_points.pop()
-            self.calibration_line_edits.pop()
+    def add_calibration_entry(self, x, y, distance=None):
+        entry = CalibrationEntry(x, y, distance, self.referenceGraphicsScene, self.calibrationList, self.calibration_entries)
+        self.calibration_entries.append(entry)
+        entry.delete_button.clicked.connect(lambda: self.remove_calibration_entry(entry))
+        entry.line_edit.textChanged.connect(self.update_calibration)
+        entry.point.mouseReleaseEvent = lambda e: self.point_mouserelease(e, entry.point)
 
-        idx = len(self.calibration_img_points)
+    def remove_calibration_entry(self, entry):
+        entry.remove()
+        self.calibration_entries.remove(entry)
 
-        # add image point
-        img_point = QGraphicsEllipseItem(x-5, y-5, 10, 10)
-        img_point.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
-        self.referenceGraphicsScene.addItem(img_point)
-        self.calibration_img_points.append(img_point)
-        img_point.mousePressEvent = lambda e: self.focus_calibration_point(idx)
+    def point_mouserelease(self, e, point):
+        # detect when we stop dragging, so we can update the calibration
+        QGraphicsEllipseItem.mouseReleaseEvent(point, e)
+        self.update_calibration()
 
-        # add depth map point
-        depth_point = QGraphicsEllipseItem(x-5, y-5, 10, 10)
-        depth_point.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
-        self.depthGraphicsScene.addItem(depth_point)
-        self.calibration_depth_points.append(depth_point)
-        depth_point.mousePressEvent = lambda e: self.focus_calibration_point(idx)
+    def update_calibration(self):
+        print("update calibration")
 
-        # add list entry
-        grid = self.calibrationGrid
-        row_idx = grid.rowCount()
-        line_edit = QLineEdit()
-        line_edit.setPlaceholderText("enter distance (m)")
-        delete_button = QPushButton("Remove")
-        grid.addWidget(line_edit, row_idx, 0)
-        grid.addWidget(delete_button, row_idx, 1)
-        self.calibration_line_edits.append(line_edit)
-        line_edit.focusInEvent = lambda e: self.line_edit_focused(e, line_edit, idx)
+        A = []
+        b = []
 
-        # focus point if it's a new one
-        if distance:
-            line_edit.setText(str(distance))
-        else:
-            self.focus_calibration_point(idx)
+        # get gt, estimated pairs
+        for entry in self.calibration_entries:
+            text = entry.line_edit.text()
+            if len(text) == 0:
+                continue
+            truth = float(text)
+            pos = entry.point.pos()
+            x = math.floor(self.rel_depth.shape[1] * pos.x() / self.ref_pixmap.width())
+            y = math.floor(self.rel_depth.shape[0] * pos.y() / self.ref_pixmap.height())
+            estim = self.rel_depth[y][x]
+
+            A.append([estim, 1])
+            b.append(truth)
         
-        # set previous point false because no value typed in yet for this point
-        self.prev_calibration_point_valid = False
-    
+        if len(b) < 2:
+            return
+        
+        # do linear regression
+        self.slope, self.intercept = np.linalg.lstsq(A, b, rcond=None)[0]
+        print(self.slope, self.intercept)
 
-    def line_edit_focused(self, e, line_edit, idx):
-        self.focus_calibration_point(idx, line_edit_triggered=True)
-        QLineEdit.focusInEvent(line_edit, e)
-    
-
-    def focus_calibration_point(self, idx, line_edit_triggered=False):
-        items = self.referenceGraphicsScene.items()
-
-        # update outline bolding
-        thin_pen = QPen(Qt.GlobalColor.red)
-        for item in self.calibration_img_points:
-            item.setPen(thin_pen)
-        for item in self.calibration_depth_points:
-            item.setPen(thin_pen)
-
-        fat_pen = QPen(Qt.GlobalColor.red)
-        fat_pen.setWidth(3)
-        self.calibration_img_points[idx].setPen(fat_pen)
-        self.calibration_depth_points[idx].setPen(fat_pen)
-
-        if not line_edit_triggered: # needed to avoid infinite loop
-            self.calibration_line_edits[idx].setFocus()
-
-
+        # correct the depth map
+        corrected = np.maximum(0.0, self.rel_depth * self.slope + self.intercept)
+        self.set_background(self.depthGraphicsView, depth_to_pixmap(corrected, rescale_width=400))
 
 
 if __name__ == '__main__':

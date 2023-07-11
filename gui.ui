@@ -141,7 +141,7 @@
              </property>
              <layout class="QVBoxLayout" name="verticalLayout_6">
               <item>
-               <layout class="QGridLayout" name="calibrationGrid"/>
+               <layout class="QVBoxLayout" name="calibrationList"/>
               </item>
               <item>
                <spacer name="verticalSpacer">
