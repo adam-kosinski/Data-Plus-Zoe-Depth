@@ -36,6 +36,9 @@ from PyQt6 import uic
 
 # abstract all the calibration stuff to a class in a different file (class CalibrationManager)
 
+# graphics view sizing (ideally allow the images to get bigger if they're able)
+
+# read depth values from depth view on hover
 
 
 def clear_layout_contents(layout):
@@ -55,7 +58,7 @@ def depth_to_pixmap(depth, rescale_width = None):
 
 class CalibrationEntry:
     def __init__(self, x, y, distance, scene, vbox, entry_list):
-        # note that some signals (remove button, finished editing, etc will be dealt with by the code using this class)
+        # note that some signals (remove button, text changed, etc will be handled by the code using this class)
 
         # references
         self.scene = scene
