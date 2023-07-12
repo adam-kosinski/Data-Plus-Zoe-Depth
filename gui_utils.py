@@ -8,8 +8,7 @@ from PyQt6.QtGui import QPixmap
 
 def clear_layout_contents(layout):
     for i in reversed(range(layout.count())):
-        print(i, layout.count())
-        widgetToRemove = layout.itemAt(i).widget()
+        widgetToRemove = layout.takeAt(i).widget()
         layout.removeWidget(widgetToRemove)
         widgetToRemove.deleteLater()
 

@@ -29,9 +29,8 @@ from calibration_manager import CalibrationManager
 
 
 # TODO
-# fix clear layout bug on calibration reset when there's at least one entry in the list
 
-# implement loading / saving calibration from csv
+# make sure all paths are relative to main window's root_path
 
 # zoedepth calibration image computation slow? I wonder if you can pick default calibration images (e.g. first image in deployment) ahead of time and start processing in the background
 
@@ -39,6 +38,7 @@ from calibration_manager import CalibrationManager
 # https://stackoverflow.com/questions/3548254/restrict-movable-area-of-qgraphicsitem
 
 # graphics view sizing (ideally allow the images to get bigger if they're able)
+# this involves changing the x,y coords in calibrations.json to fractional units of total width/height
 
 # read depth values from depth view on hover
 
@@ -76,7 +76,7 @@ class MainWindow(QMainWindow):
         # self.imgDisplay.setMouseTracking(True)
         # self.imgDisplay.mouseMoveEvent = self.update_dist
 
-        self.calibration_manager.init_calibration("first_cropped")
+        self.calibration_manager.init_calibration("second_cropped")
         
         self.resize(QSize(800, 600))
     
@@ -103,6 +103,7 @@ class MainWindow(QMainWindow):
             self.root_path = dialog.selectedFiles()[0]
         
         self.rootFolderLabel.setText(self.root_path)
+        self.calibration_manager.set_root_path(self.root_path)
         
         # display deployments
         grid = self.deploymentGrid

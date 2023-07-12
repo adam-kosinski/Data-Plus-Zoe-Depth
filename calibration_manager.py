@@ -2,6 +2,7 @@ import numpy as np
 import os
 import math
 from PIL import Image
+import json
 
 from gui_utils import clear_layout_contents, depth_to_pixmap
 
@@ -38,7 +39,6 @@ class CalibrationManager:
         self.ref_view = main_window.referenceGraphicsView
         self.depth_view = main_window.depthGraphicsView
         
-
         # set full viewport update (for background) - gets rid of weird artifacts when items move around, due to update region calculations missing like half a pixel
         self.ref_view.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
         self.depth_view.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
@@ -53,6 +53,7 @@ class CalibrationManager:
         main_window.openCalibrationImageButton.clicked.connect(self.choose_ref_image)
         self.scene.mousePressEvent = self.scene_mouse_press
         main_window.backToMainButton.clicked.connect(self.exit_calibration)
+        main_window.saveCalibrationButton.clicked.connect(self.save)
         main_window.testReset.clicked.connect(self.reset)
 
         # set up other stuff and state via the reset function
@@ -60,14 +61,18 @@ class CalibrationManager:
         self.reset()
     
     def reset(self):
-        clear_layout_contents(self.vbox)
         for entry in self.calibration_entries:
             entry.remove()
         self.calibration_entries = []
 
         self.saved = True
-        self.rel_depth = None
+        self.main_window.saveCalibrationButton.setEnabled(False)
+        self.deployment_json = None
+
+        self.deployment = ""
         self.ref_image_path = None
+        self.rel_depth_path = None
+        self.rel_depth = None
         self.slope = None
         self.intercept = None
         self.ref_pixmap = None
@@ -81,9 +86,29 @@ class CalibrationManager:
     
     def init_calibration(self, deployment):
         print(deployment)
+        self.deployment = deployment
         self.main_window.screens.setCurrentWidget(self.main_window.calibrationScreen)
         self.main_window.calibrationTitle.setText("Deployment: " + deployment)
 
+        # check if we have a calibration saved for this deployment, if so, load it
+        with open(self.json_path) as json_file:
+            json_data = json.load(json_file)
+
+        if deployment in json_data:
+            data = json_data[deployment]
+            self.ref_image_path = data["ref_image_path"]
+            self.rel_depth_path = data["rel_depth_path"]
+            self.slope = data["slope"]
+            self.intercept = data["intercept"]
+
+            self.init_calibration_image(self.ref_image_path)
+            with Image.open(self.rel_depth_path) as depth_img:
+                self.rel_depth = np.asarray(depth_img) / 256
+            self.display_depth(self.rel_depth * self.slope + self.intercept)
+
+            for point in data["points"]:
+                self.add_calibration_entry(point["x"], point["y"], point["distance"])
+        
     def choose_ref_image(self):
         dialog = QFileDialog(parent=self.main_window, caption="Choose Reference Image", directory=self.main_window.root_path)
         dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
@@ -96,10 +121,10 @@ class CalibrationManager:
         self.init_calibration_image(self.ref_image_path)
 
         # TEMP
-        with Image.open("second_results/RCNX0332_raw.png") as raw_img:
+        self.rel_depth_path = "second_results/RCNX0332_raw.png"
+        with Image.open(self.rel_depth_path) as raw_img:
             self.rel_depth = np.asarray(raw_img) / 256
-        self.set_background(self.depth_view, depth_to_pixmap(self.rel_depth, rescale_width=400))
-        self.depth_view.setScene(self.scene)
+        self.display_depth(self.rel_depth)
 
     def init_calibration_image(self, fpath):
         # update scenes
@@ -113,6 +138,9 @@ class CalibrationManager:
         self.ref_view.setMinimumSize(self.ref_pixmap.width(), self.ref_pixmap.height())
         self.depth_view.setMinimumSize(self.ref_pixmap.width(), self.ref_pixmap.height())
 
+    def display_depth(self, depth):
+        self.depth_view.setScene(self.scene)
+        self.set_background(self.depth_view, depth_to_pixmap(depth, rescale_width=400))
 
     def set_background(self, graphics_view, pixmap):
         graphics_view.drawBackground = lambda painter, rect: painter.drawPixmap(rect, pixmap, rect)
@@ -127,8 +155,6 @@ class CalibrationManager:
 
     def add_calibration_entry(self, x, y, distance=None):
         print(x,y)
-        if not self.ref_image_path:
-            return
         entry = CalibrationEntry(x, y, distance, self.scene, self.vbox, self.calibration_entries)
         self.calibration_entries.append(entry)
         entry.delete_button.clicked.connect(lambda: self.remove_calibration_entry(entry))
@@ -149,6 +175,9 @@ class CalibrationManager:
         # Ax = b for linear regression
         A = []
         b = []
+        # store x and y to update deployment json and the end of the function
+        x_coords = []
+        y_coords = []
 
         # get pairs of truth, estimated
         for entry in self.calibration_entries:
@@ -163,6 +192,8 @@ class CalibrationManager:
 
             A.append([estim, 1])
             b.append(truth)
+            x_coords.append(entry.point.pos().x())
+            y_coords.append(entry.point.pos().y())
         
         # need at least 2 points for linear regression
         if len(b) < 2:
@@ -172,12 +203,49 @@ class CalibrationManager:
         
         # do linear regression
         self.slope, self.intercept = np.linalg.lstsq(A, b, rcond=None)[0]
-        self.saved = False
-        print(self.slope, self.intercept)
+        print(self.slope, self.intercept, A, b)
 
         # correct the depth map
         corrected = np.maximum(0.0, self.rel_depth * self.slope + self.intercept)
         self.set_background(self.depth_view, depth_to_pixmap(corrected, rescale_width=400))
+
+        # update deployment json
+        self.saved = False
+        self.main_window.saveCalibrationButton.setEnabled(True)
+        self.deployment_json = {
+            "ref_image_path": self.ref_image_path,
+            "rel_depth_path": self.rel_depth_path,
+            "slope": self.slope,
+            "intercept": self.intercept,
+            "points": [{
+                "x": x_coords[i],
+                "y": y_coords[i],
+                "distance": b[i]
+            } for i in range(len(b))]
+        }
+
+
+    def set_root_path(self, root_path):
+        self.root_path = root_path
+        self.calib_dir = os.path.join(self.root_path, "calibration")
+        self.json_path = os.path.join(self.calib_dir, "calibrations.json")
+
+    def save(self):
+        os.makedirs(self.calib_dir, exist_ok=True)
+        
+        if os.path.exists(self.json_path):
+            with open(self.json_path) as json_file:
+                json_data = json.load(json_file)
+        else:
+            json_data = {}
+        
+        json_data[self.deployment] = self.deployment_json
+        with open(self.json_path, "w") as json_file:
+            json.dump(json_data, json_file, indent=4)
+        
+        self.saved = True
+        self.main_window.saveCalibrationButton.setEnabled(False)
+    
 
     def exit_calibration(self):
         if not self.saved:
@@ -185,6 +253,7 @@ class CalibrationManager:
             if button != QMessageBox.StandardButton.Yes:
                 return
         self.main_window.screens.setCurrentWidget(self.main_window.mainScreen)
+        self.reset()
     
     
 
@@ -195,7 +264,7 @@ class CalibrationManager:
 class CalibrationEntry:
     def __init__(self, x, y, distance, scene, vbox, calibration_entries):
         # note that some signals (remove button, text changed, etc will be handled by the code using this class)
-
+        
         # references
         self.scene = scene
         self.calibration_entries = calibration_entries
@@ -225,7 +294,7 @@ class CalibrationEntry:
         vbox.addLayout(self.hbox)
 
         if distance:
-            self.line_edit.setText(distance)
+            self.line_edit.setText(str(distance))
             self.unfocus()
         else:
             self.focus()
