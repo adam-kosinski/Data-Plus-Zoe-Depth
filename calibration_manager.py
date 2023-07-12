@@ -5,6 +5,7 @@ from PIL import Image
 import json
 
 from gui_utils import clear_layout_contents, depth_to_pixmap
+from zoedepth.utils.misc import save_raw_16bit
 
 
 from PyQt6.QtCore import Qt
@@ -123,11 +124,14 @@ class CalibrationManager:
         self.ref_image_path = os.path.relpath(abs_path, self.main_window.root_path)
         self.init_calibration_image(self.ref_image_path)
 
+        # start relative depth calculation
+        self.main_window.zoe_manager.infer(abs_path, self.process_zoe_result)
+
         # TEMP
-        self.rel_depth_path = os.path.relpath("C:/Users/AdamK/Documents/ZoeDepth/second_results/RCNX0332_raw.png", start=self.root_path)
-        with Image.open(os.path.join(self.root_path, self.rel_depth_path)) as raw_img:
-            self.rel_depth = np.asarray(raw_img) / 256
-        self.display_depth(self.rel_depth)
+        # self.rel_depth_path = os.path.relpath("C:/Users/AdamK/Documents/ZoeDepth/second_results/RCNX0332_raw.png", start=self.root_path)
+        # with Image.open(os.path.join(self.root_path, self.rel_depth_path)) as raw_img:
+        #     self.rel_depth = np.asarray(raw_img) / 256
+        # self.display_depth(self.rel_depth)
 
     def init_calibration_image(self, fpath):
         abs_fpath = os.path.join(self.root_path, fpath)
@@ -142,6 +146,17 @@ class CalibrationManager:
         # sizing
         self.ref_view.setMinimumSize(self.ref_pixmap.width(), self.ref_pixmap.height())
         self.depth_view.setMinimumSize(self.ref_pixmap.width(), self.ref_pixmap.height())
+    
+    def process_zoe_result(self, depth):
+        # save
+        basename = os.path.basename(self.ref_image_path)
+        abs_path = os.path.join(self.calib_dir, os.path.splitext(basename)[0] + "_raw.png")
+        self.rel_depth_path = os.path.relpath(abs_path, start=self.root_path)
+        save_raw_16bit(depth, abs_path)
+        # update things
+        self.display_depth(depth)
+        self.rel_depth = depth
+        self.update_calibration()
 
     def display_depth(self, depth):
         self.depth_view.setScene(self.scene)
@@ -159,7 +174,6 @@ class CalibrationManager:
         self.add_calibration_entry(pos.x(), pos.y())
 
     def add_calibration_entry(self, x, y, distance=None):
-        print(x,y)
         entry = CalibrationEntry(x, y, distance, self.scene, self.vbox, self.calibration_entries)
         self.calibration_entries.append(entry)
         entry.delete_button.clicked.connect(lambda: self.remove_calibration_entry(entry))
@@ -176,6 +190,9 @@ class CalibrationManager:
         self.update_calibration()
 
     def update_calibration(self):
+        # if depth not computed yet, don't try to run a linear regression on it
+        if not self.rel_depth_path:
+            return
 
         # Ax = b for linear regression
         A = []
@@ -208,7 +225,7 @@ class CalibrationManager:
         
         # do linear regression
         self.slope, self.intercept = np.linalg.lstsq(A, b, rcond=None)[0]
-        print(self.slope, self.intercept, A, b)
+        print(self.slope, self.intercept)
 
         # correct the depth map
         corrected = np.maximum(0.0, self.rel_depth * self.slope + self.intercept)

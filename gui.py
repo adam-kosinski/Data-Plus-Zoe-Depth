@@ -26,14 +26,15 @@ from PyQt6 import uic
 
 from gui_utils import clear_layout_contents, depth_to_pixmap
 from calibration_manager import CalibrationManager
-# from zoe_manager import ZoeManager
+from zoe_manager import ZoeManager
 
 
 # TODO
 
-# make sure all paths are relative to main window's root_path
 
 # zoedepth calibration image computation slow? I wonder if you can pick default calibration images (e.g. first image in deployment) ahead of time and start processing in the background
+
+# note that there is a lag spike right when the model is loaded, when it is being assigned to self.zoe I'm pretty sure, can figure out how to do that in a thread
 
 # implement itemChange event for points, to avoid dragging out of bounds
 # https://stackoverflow.com/questions/3548254/restrict-movable-area-of-qgraphicsitem
@@ -67,6 +68,7 @@ class MainWindow(QMainWindow):
         self.openRootFolder.clicked.connect(self.open_root_folder)
         
         self.calibration_manager = CalibrationManager(self)
+        self.zoe_manager = ZoeManager(self)
 
         self.deployment_hboxes = {} # keep references to these so we can move them between the uncalibrated and calibrated lists
 
@@ -117,6 +119,8 @@ class MainWindow(QMainWindow):
         
         for path in os.listdir(self.root_path):
             if not os.path.isdir(os.path.join(self.root_path, path)):
+                continue
+            if path == "calibration":
                 continue
             button = QPushButton("Calibrate")
             button.clicked.connect(functools.partial(self.calibration_manager.init_calibration, path))   # functools for using the current value of item, not whatever it ends up being
