@@ -38,10 +38,13 @@ from calibration_manager import CalibrationManager
 # implement itemChange event for points, to avoid dragging out of bounds
 # https://stackoverflow.com/questions/3548254/restrict-movable-area-of-qgraphicsitem
 
-
 # graphics view sizing (ideally allow the images to get bigger if they're able)
 
 # read depth values from depth view on hover
+
+# Perhaps for more flexible calibration in the future, add an option to draw a box around parts of the image that aren't part of the environment
+# for instance, people holding a sign, or animals
+# And it could potentially be nice to be able to use multiple images? If the researcher used the take-pics-of-person-at-distance method
 
 
 
@@ -104,14 +107,14 @@ class MainWindow(QMainWindow):
         # display deployments
         grid = self.deploymentGrid
         clear_layout_contents(grid)
-        for item in os.listdir(self.root_path):
-            if not os.path.isdir(item):
+        for path in os.listdir(self.root_path):
+            if not os.path.isdir(path):
                 continue
             row_idx = grid.rowCount()
             button = QPushButton("Calibrate")
-            button.clicked.connect(functools.partial(self.calibration_manager.init_calibration, item))   # functools for using the current value of item, not whatever it ends up being
+            button.clicked.connect(functools.partial(self.calibration_manager.init_calibration, path))   # functools for using the current value of item, not whatever it ends up being
             grid.addWidget(button, row_idx, 0)
-            grid.addWidget(QLabel(item), row_idx, 1)
+            grid.addWidget(QLabel(path), row_idx, 1)
     
     
 
