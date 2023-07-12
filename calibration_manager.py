@@ -54,7 +54,6 @@ class CalibrationManager:
         self.scene.mousePressEvent = self.scene_mouse_press
         main_window.backToMainButton.clicked.connect(self.exit_calibration)
         main_window.saveCalibrationButton.clicked.connect(self.save)
-        main_window.testReset.clicked.connect(self.reset)
 
         # set up other stuff and state via the reset function
         self.calibration_entries = []
@@ -91,8 +90,7 @@ class CalibrationManager:
         self.main_window.calibrationTitle.setText("Deployment: " + deployment)
 
         # check if we have a calibration saved for this deployment, if so, load it
-        with open(self.json_path) as json_file:
-            json_data = json.load(json_file)
+        json_data = self.get_json()
 
         if deployment in json_data:
             data = json_data[deployment]
@@ -230,18 +228,24 @@ class CalibrationManager:
         self.calib_dir = os.path.join(self.root_path, "calibration")
         self.json_path = os.path.join(self.calib_dir, "calibrations.json")
 
+    def get_json(self):
+        if os.path.exists(self.json_path):
+            with open(self.json_path) as json_file:
+                return json.load(json_file)
+        return {}
+
     def save(self):
         os.makedirs(self.calib_dir, exist_ok=True)
         
-        if os.path.exists(self.json_path):
-            with open(self.json_path) as json_file:
-                json_data = json.load(json_file)
-        else:
-            json_data = {}
-        
+        json_data = self.get_json()
         json_data[self.deployment] = self.deployment_json
         with open(self.json_path, "w") as json_file:
             json.dump(json_data, json_file, indent=4)
+        
+        # mark hbox as calibrated on main screen
+        hbox = self.main_window.deployment_hboxes[self.deployment]
+        hbox.setParent(None)
+        self.main_window.calibratedDeployments.addLayout(hbox)
         
         self.saved = True
         self.main_window.saveCalibrationButton.setEnabled(False)

@@ -42,6 +42,8 @@ from calibration_manager import CalibrationManager
 
 # read depth values from depth view on hover
 
+# Calibration "save and next" button or something like that? For faster workflow
+
 # Perhaps for more flexible calibration in the future, add an option to draw a box around parts of the image that aren't part of the environment
 # for instance, people holding a sign, or animals
 # And it could potentially be nice to be able to use multiple images? If the researcher used the take-pics-of-person-at-distance method
@@ -60,11 +62,9 @@ class MainWindow(QMainWindow):
 
         self.openRootFolder.clicked.connect(self.open_root_folder)
         
-
-        self.deploymentGrid.setColumnStretch(1, 1)
-
         self.calibration_manager = CalibrationManager(self)
 
+        self.deployment_hboxes = {} # keep references to these so we can move them between the uncalibrated and calibrated lists
 
         # temp
         self.open_root_folder("test")
@@ -75,8 +75,6 @@ class MainWindow(QMainWindow):
         
         # self.imgDisplay.setMouseTracking(True)
         # self.imgDisplay.mouseMoveEvent = self.update_dist
-
-        self.calibration_manager.init_calibration("second_cropped")
         
         self.resize(QSize(800, 600))
     
@@ -106,16 +104,28 @@ class MainWindow(QMainWindow):
         self.calibration_manager.set_root_path(self.root_path)
         
         # display deployments
-        grid = self.deploymentGrid
-        clear_layout_contents(grid)
+
+        clear_layout_contents(self.uncalibratedDeployments)
+        clear_layout_contents(self.calibratedDeployments)
+        self.deployment_hboxes = {}
+
+        json_data = self.calibration_manager.get_json()
+        
         for path in os.listdir(self.root_path):
             if not os.path.isdir(path):
                 continue
-            row_idx = grid.rowCount()
             button = QPushButton("Calibrate")
             button.clicked.connect(functools.partial(self.calibration_manager.init_calibration, path))   # functools for using the current value of item, not whatever it ends up being
-            grid.addWidget(button, row_idx, 0)
-            grid.addWidget(QLabel(path), row_idx, 1)
+            hbox = QHBoxLayout()
+            self.deployment_hboxes[path] = hbox
+            hbox.widget_name = "deployment_" + path + "_hbox"
+            hbox.addWidget(button)
+            hbox.addWidget(QLabel(path))
+            hbox.addStretch()
+            if path in json_data:
+                self.calibratedDeployments.addLayout(hbox)
+            else:
+                self.uncalibratedDeployments.addLayout(hbox)
     
     
 
