@@ -34,7 +34,7 @@ class ZoeManager(QObject):
         # callback is a function that takes one argument - the outputted depth in np array form
         
         if not self.zoe:
-            print("Queuing request for " + abs_fpath)
+            print("Queueing request for " + abs_fpath)
             # jobs submitted before the model is built are stored in the queue
             # once the model is built, the queue is processed and not used again (threadpool will handle queueing)
             self.queue.append({

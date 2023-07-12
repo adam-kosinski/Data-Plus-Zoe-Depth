@@ -125,13 +125,8 @@ class CalibrationManager:
         self.init_calibration_image(self.ref_image_path)
 
         # start relative depth calculation
+        self.set_background(self.depth_view, QPixmap())
         self.main_window.zoe_manager.infer(abs_path, self.process_zoe_result)
-
-        # TEMP
-        # self.rel_depth_path = os.path.relpath("C:/Users/AdamK/Documents/ZoeDepth/second_results/RCNX0332_raw.png", start=self.root_path)
-        # with Image.open(os.path.join(self.root_path, self.rel_depth_path)) as raw_img:
-        #     self.rel_depth = np.asarray(raw_img) / 256
-        # self.display_depth(self.rel_depth)
 
     def init_calibration_image(self, fpath):
         abs_fpath = os.path.join(self.root_path, fpath)
@@ -149,8 +144,7 @@ class CalibrationManager:
     
     def process_zoe_result(self, depth):
         # save
-        basename = os.path.basename(self.ref_image_path)
-        abs_path = os.path.join(self.calib_dir, os.path.splitext(basename)[0] + "_raw.png")
+        abs_path = os.path.join(self.calib_dir, self.deployment + "_raw.png")
         self.rel_depth_path = os.path.relpath(abs_path, start=self.root_path)
         save_raw_16bit(depth, abs_path)
         # update things
@@ -183,6 +177,7 @@ class CalibrationManager:
     def remove_calibration_entry(self, entry):
         entry.remove()
         self.calibration_entries.remove(entry)
+        self.update_calibration()
 
     def point_mouserelease(self, e, point):
         # detect when we stop dragging, so we can update the calibration
@@ -251,6 +246,7 @@ class CalibrationManager:
         self.root_path = root_path
         self.calib_dir = os.path.join(self.root_path, "calibration")
         self.json_path = os.path.join(self.calib_dir, "calibrations.json")
+        os.makedirs(self.calib_dir, exist_ok=True)
 
     def get_json(self):
         if os.path.exists(self.json_path):
@@ -269,9 +265,7 @@ class CalibrationManager:
             return json_data
         return {}
 
-    def save(self):
-        os.makedirs(self.calib_dir, exist_ok=True)
-        
+    def save(self):        
         json_data = self.get_json()
         json_data[self.deployment] = self.deployment_json
         with open(self.json_path, "w") as json_file:

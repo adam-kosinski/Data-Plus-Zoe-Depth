@@ -31,8 +31,8 @@ from zoe_manager import ZoeManager
 
 # TODO
 
-
 # zoedepth calibration image computation slow? I wonder if you can pick default calibration images (e.g. first image in deployment) ahead of time and start processing in the background
+# or - should be able to save a calibration without depth computed yet, and have the depth + linear regression finishing computing in a thread somewhere
 
 # note that there is a lag spike right when the model is loaded, when it is being assigned to self.zoe I'm pretty sure, can figure out how to do that in a thread
 
@@ -105,9 +105,11 @@ class MainWindow(QMainWindow):
             if not dialog.exec():
                 return
             self.root_path = dialog.selectedFiles()[0]
-        
+
+        self.root_path = os.path.normpath(self.root_path)    # normpath to keep slashses standardized, in case that matters
         self.rootFolderLabel.setText(self.root_path)
         self.calibration_manager.set_root_path(self.root_path)
+        print(self.root_path)
         
         # display deployments
 
