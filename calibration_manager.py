@@ -89,7 +89,7 @@ class CalibrationManager:
         self.main_window.calibrationTitle.setText("Deployment: " + deployment)
 
         # check if we have a calibration saved for this deployment, if so, load it
-        json_data = self.get_json()
+        json_data = self.get_json() # this filters to make sure image files still exist
 
         if deployment in json_data:
             data = json_data[deployment]
@@ -98,11 +98,16 @@ class CalibrationManager:
             self.slope = data["slope"]
             self.intercept = data["intercept"]
 
+            # load reference image
             self.init_calibration_image(self.ref_image_path)
-            with Image.open(self.rel_depth_path) as depth_img:
+
+            # load depth
+            depth_abspath = os.path.join(self.root_path, self.rel_depth_path)
+            with Image.open(depth_abspath) as depth_img:
                 self.rel_depth = np.asarray(depth_img) / 256
             self.display_depth(self.rel_depth * self.slope + self.intercept)
 
+            # load calibration entries
             for point in data["points"]:
                 self.add_calibration_entry(point["x"], point["y"], point["distance"])
         
@@ -113,14 +118,14 @@ class CalibrationManager:
         dialog.setNameFilter("*.jpg *.jpeg *.png")
         if not dialog.exec():
             return
+        
         abs_path = dialog.selectedFiles()[0]
         self.ref_image_path = os.path.relpath(abs_path, self.main_window.root_path)
-        print(self.ref_image_path)
         self.init_calibration_image(self.ref_image_path)
 
         # TEMP
-        self.rel_depth_path = "C:/Users/AdamK/Documents/ZoeDepth/second_results/RCNX0332_raw.png"
-        with Image.open(self.rel_depth_path) as raw_img:
+        self.rel_depth_path = os.path.relpath("C:/Users/AdamK/Documents/ZoeDepth/second_results/RCNX0332_raw.png", start=self.root_path)
+        with Image.open(os.path.join(self.root_path, self.rel_depth_path)) as raw_img:
             self.rel_depth = np.asarray(raw_img) / 256
         self.display_depth(self.rel_depth)
 
@@ -233,7 +238,18 @@ class CalibrationManager:
     def get_json(self):
         if os.path.exists(self.json_path):
             with open(self.json_path) as json_file:
-                return json.load(json_file)
+                json_data = json.load(json_file)
+
+            # don't return entries where the files no longer exist
+            # use list(json_data) so we're not iterating over json_data while removing stuff from it
+            for deployment in list(json_data):
+                data = json_data[deployment]
+                ref_abspath = os.path.join(self.root_path, data["ref_image_path"])
+                depth_abspath = os.path.join(self.root_path, data["rel_depth_path"])
+                if not os.path.exists(ref_abspath) or not os.path.exists(depth_abspath):
+                    del json_data[deployment]
+
+            return json_data
         return {}
 
     def save(self):
