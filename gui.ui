@@ -59,6 +59,13 @@
          </layout>
         </item>
         <item>
+         <widget class="QLabel" name="label">
+          <property name="text">
+           <string>Uncalibrated Deployments</string>
+          </property>
+         </widget>
+        </item>
+        <item>
          <widget class="QScrollArea" name="scrollArea">
           <property name="widgetResizable">
            <bool>true</bool>
@@ -69,17 +76,10 @@
              <x>0</x>
              <y>0</y>
              <width>681</width>
-             <height>188</height>
+             <height>174</height>
             </rect>
            </property>
            <layout class="QVBoxLayout" name="verticalLayout_2">
-            <item>
-             <widget class="QLabel" name="label">
-              <property name="text">
-               <string>Uncalibrated Deployments</string>
-              </property>
-             </widget>
-            </item>
             <item>
              <layout class="QVBoxLayout" name="uncalibratedDeployments"/>
             </item>
@@ -101,6 +101,13 @@
          </widget>
         </item>
         <item>
+         <widget class="QLabel" name="label_2">
+          <property name="text">
+           <string>Calibrated Deployments</string>
+          </property>
+         </widget>
+        </item>
+        <item>
          <widget class="QScrollArea" name="scrollArea_2">
           <property name="widgetResizable">
            <bool>true</bool>
@@ -111,17 +118,10 @@
              <x>0</x>
              <y>0</y>
              <width>681</width>
-             <height>188</height>
+             <height>174</height>
             </rect>
            </property>
            <layout class="QVBoxLayout" name="verticalLayout_3">
-            <item>
-             <widget class="QLabel" name="label_2">
-              <property name="text">
-               <string>Calibrated Deployments</string>
-              </property>
-             </widget>
-            </item>
             <item>
              <layout class="QVBoxLayout" name="calibratedDeployments"/>
             </item>

@@ -7,12 +7,11 @@ import json
 from gui_utils import clear_layout_contents, depth_to_pixmap
 
 
-from PyQt6.QtCore import QSize, Qt, QRunnable, QThreadPool, QObject, pyqtSignal, QPoint
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QFileDialog,
     QMessageBox,
-    QLabel,
     QPushButton,
     QGraphicsScene,
     QGraphicsView,
@@ -108,7 +107,8 @@ class CalibrationManager:
                 self.add_calibration_entry(point["x"], point["y"], point["distance"])
         
     def choose_ref_image(self):
-        dialog = QFileDialog(parent=self.main_window, caption="Choose Reference Image", directory=self.main_window.root_path)
+        open_directory = os.path.join(self.root_path, self.deployment)
+        dialog = QFileDialog(parent=self.main_window, caption="Choose Reference Image", directory=open_directory)
         dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
         dialog.setNameFilter("*.jpg *.jpeg *.png")
         if not dialog.exec():
@@ -119,18 +119,20 @@ class CalibrationManager:
         self.init_calibration_image(self.ref_image_path)
 
         # TEMP
-        self.rel_depth_path = "second_results/RCNX0332_raw.png"
+        self.rel_depth_path = "C:/Users/AdamK/Documents/ZoeDepth/second_results/RCNX0332_raw.png"
         with Image.open(self.rel_depth_path) as raw_img:
             self.rel_depth = np.asarray(raw_img) / 256
         self.display_depth(self.rel_depth)
 
     def init_calibration_image(self, fpath):
+        abs_fpath = os.path.join(self.root_path, fpath)
+
         # update scenes
         self.ref_view.setScene(self.scene)
         self.depth_view.setScene(self.loading_depth_scene)
 
         # display pixmap background
-        self.ref_pixmap = QPixmap(fpath).scaledToWidth(400, mode=Qt.TransformationMode.SmoothTransformation)
+        self.ref_pixmap = QPixmap(abs_fpath).scaledToWidth(400, mode=Qt.TransformationMode.SmoothTransformation)
         self.set_background(self.ref_view, self.ref_pixmap)
         # sizing
         self.ref_view.setMinimumSize(self.ref_pixmap.width(), self.ref_pixmap.height())

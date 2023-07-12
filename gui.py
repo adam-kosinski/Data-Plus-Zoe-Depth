@@ -26,6 +26,7 @@ from PyQt6 import uic
 
 from gui_utils import clear_layout_contents, depth_to_pixmap
 from calibration_manager import CalibrationManager
+# from zoe_manager import ZoeManager
 
 
 # TODO
@@ -58,7 +59,10 @@ from calibration_manager import CalibrationManager
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        uic.loadUi("gui.ui", self)
+        ui_path = os.path.join(os.path.dirname(__file__), "gui.ui")
+        uic.loadUi(ui_path, self)
+
+        self.root_path = None
 
         self.openRootFolder.clicked.connect(self.open_root_folder)
         
@@ -67,7 +71,7 @@ class MainWindow(QMainWindow):
         self.deployment_hboxes = {} # keep references to these so we can move them between the uncalibrated and calibrated lists
 
         # temp
-        self.open_root_folder("test")
+        self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/test")
         # with Image.open("second_results/calibrated/RCNX0332_raw.png") as raw_img:
         #     self.data = np.asarray(raw_img) / 256
         #     self.pixmap = depth_to_pixmap(self.data, rescale_width=400)
@@ -112,7 +116,7 @@ class MainWindow(QMainWindow):
         json_data = self.calibration_manager.get_json()
         
         for path in os.listdir(self.root_path):
-            if not os.path.isdir(path):
+            if not os.path.isdir(os.path.join(self.root_path, path)):
                 continue
             button = QPushButton("Calibrate")
             button.clicked.connect(functools.partial(self.calibration_manager.init_calibration, path))   # functools for using the current value of item, not whatever it ends up being
