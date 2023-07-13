@@ -142,9 +142,9 @@ class CalibrationManager:
         self.ref_view.setMinimumSize(self.ref_pixmap.width(), self.ref_pixmap.height())
         self.depth_view.setMinimumSize(self.ref_pixmap.width(), self.ref_pixmap.height())
     
-    def process_zoe_result(self, depth):
+    def process_zoe_result(self, depth, abs_fpath):
         # save
-        abs_path = os.path.join(self.calib_dir, self.deployment + "_raw.png")
+        abs_path = os.path.join(self.calib_dir, f"{self.deployment}_{os.path.splitext(os.path.basename(abs_fpath))[0]}_raw.png")
         self.rel_depth_path = os.path.relpath(abs_path, start=self.root_path)
         save_raw_16bit(depth, abs_path)
         # update things

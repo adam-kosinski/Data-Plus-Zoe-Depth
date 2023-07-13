@@ -76,7 +76,7 @@
              <x>0</x>
              <y>0</y>
              <width>681</width>
-             <height>174</height>
+             <height>163</height>
             </rect>
            </property>
            <layout class="QVBoxLayout" name="verticalLayout_2">
@@ -107,6 +107,13 @@
           </property>
          </widget>
         </item>
+        <item alignment="Qt::AlignLeft">
+         <widget class="QPushButton" name="runButton">
+          <property name="text">
+           <string>Run Distance Estimation</string>
+          </property>
+         </widget>
+        </item>
         <item>
          <widget class="QScrollArea" name="scrollArea_2">
           <property name="widgetResizable">
@@ -118,7 +125,7 @@
              <x>0</x>
              <y>0</y>
              <width>681</width>
-             <height>174</height>
+             <height>164</height>
             </rect>
            </property>
            <layout class="QVBoxLayout" name="verticalLayout_3">
@@ -228,8 +235,8 @@
               <rect>
                <x>0</x>
                <y>0</y>
-               <width>336</width>
-               <height>363</height>
+               <width>32</width>
+               <height>18</height>
               </rect>
              </property>
              <layout class="QVBoxLayout" name="verticalLayout_6">
