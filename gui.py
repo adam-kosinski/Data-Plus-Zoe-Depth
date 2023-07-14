@@ -4,8 +4,9 @@ import functools
 from PIL import Image
 import json
 import csv
+import torch
 
-from PyQt6.QtCore import QSize, Qt, QRunnable, QThreadPool, QObject, pyqtSignal, QPoint
+from PyQt6.QtCore import QSize, Qt, QRunnable, QThreadPool, QObject, pyqtSignal, QPoint, QThread
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -37,6 +38,10 @@ import run_detector_batch
 
 
 # TODO
+
+# figure out bug about a zoe worker finishing but the results not getting saved
+# - I have a hunch this is due to running out of threads, or because threads are limited, a DepthEstimationWorker getting deleted after its run() method finishes (but before the zoe results come in)
+# *** essentially, weirdness happening from passing control between depth estimation and zoe QRunnables, should all just be in one
 
 # if someone picks a calibration image and then picks a different one, both depth callbacks will occur, but I'm not sure the order is guaranteed
 # - would be nice of having a way to cancel a job. Perhaps using processes works better
@@ -87,7 +92,7 @@ class MainWindow(QMainWindow):
         self.threadpool = QThreadPool()
 
         self.calibration_manager = CalibrationManager(self)
-        self.zoe_manager = ZoeManager(self)
+        # self.zoe_manager = ZoeManager(self)
 
         self.deployment_hboxes = {} # keep references to these so we can move them between the uncalibrated and calibrated lists
 
@@ -167,13 +172,12 @@ class MainWindow(QMainWindow):
         # self.runButton.setEnabled(False)
         print("RUNNING DEPTH ESTIMATION ===============================")
 
-        # get calibrations, will only run on calibrated deployments
-        json_data = self.calibration_manager.get_json()
+        # reset rows so we don't get duplicates
+        self.output_rows = []
         
-        for deployment in json_data:
-            worker = DepthEstimationWorker(self, deployment, json_data[deployment])
-            worker.signals.result.connect(self.process_animal_depth_results)
-            self.threadpool.start(worker)
+        worker = DepthEstimationWorker(self)
+        worker.signals.result.connect(self.process_animal_depth_results)
+        self.threadpool.start(worker)
     
     def process_animal_depth_results(self, new_rows):
         if len(new_rows) == 0:
@@ -198,123 +202,144 @@ class MainWindow(QMainWindow):
 
 class DepthEstimationSignals(QObject):
     megadetector_done = pyqtSignal(object)  # doesn't carry data, but not providing an argument broke stuff
-    zoedepth_progress = pyqtSignal(int, int)   # current index (starting at 1), total files to process
-    result = pyqtSignal(object)    # contains the depth estimates, MainWindow will do the writing to output file
+    # zoedepth_progress = pyqtSignal(int, int)   # current index (starting at 1), total files to process
+    result = pyqtSignal(object)    # contains depth estimates (this signal gets emitted multiple times as more depths come in), MainWindow will do the writing to output file
 
 
 
 class DepthEstimationWorker(QRunnable):
-    def __init__(self, main_window, deployment, calibration_json):
+    def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window
-        self.deployment = deployment
-        self.calibration_json = calibration_json
-        self.input_dir = os.path.join(main_window.root_path, deployment)
-        self.detections_dir = os.path.join(self.main_window.root_path, "detections")
-        self.depth_maps_dir = os.path.join(self.main_window.root_path, "depth_maps", deployment)
-        os.makedirs(self.detections_dir, exist_ok=True)
-        os.makedirs(self.depth_maps_dir, exist_ok=True)
+        self.root_path = main_window.root_path
+        self.calibration_json = main_window.calibration_manager.get_json()
+
         self.signals = DepthEstimationSignals()
 
 
     def run(self):
 
-        # run megadetector
-
-        output_file = os.path.join(self.detections_dir, self.deployment + ".json")
-
-        if not os.path.exists(output_file):
-            arg_string = f"megadetector_weights/md_v5a.0.0.pt {self.input_dir} {output_file} --threshold 0.2"
-            run_detector_batch.main(arg_string)
+        # run megadetector (do all of this before zoedepth to avoid weird conflicts when building the zoe model)
         
-        with open(output_file) as json_file:
-            self.bbox_json = json.load(json_file)
+        detections_dir = os.path.join(self.root_path, "detections")
+        os.makedirs(detections_dir, exist_ok=True)
+        
+        for deployment in self.calibration_json:
+            print(deployment)
+            
+            output_file = os.path.join(detections_dir, deployment + ".json")
+            if not os.path.exists(output_file):
+                input_dir = os.path.join(self.root_path, deployment)
+                arg_string = f"megadetector_weights/md_v5a.0.0.pt {input_dir} {output_file} --threshold 0.2"
+                run_detector_batch.main(arg_string)
+            print("Megadetector done with deployment", deployment)
+        
+        print("Megadetector done")
         self.signals.megadetector_done.emit(None)
+
+
+
+        # run zoedepth and get animal distances
+
+        # build zoedepth model
+        # first arg to torch hub load is repository root, which because of copying datas in the spec file will be the folder where the executable runs
+        model_zoe_nk = torch.hub.load(os.path.dirname(__file__), "ZoeD_NK", source="local", pretrained=True, config_mode="eval")
+        DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+        zoe = model_zoe_nk.to(DEVICE)
+
+        for deployment in self.calibration_json:
+
+            input_dir = os.path.join(self.root_path, deployment)
+            depth_maps_dir = os.path.join(self.root_path, "depth_maps", deployment)
+            os.makedirs(depth_maps_dir, exist_ok=True)
+            with open(os.path.join(detections_dir, deployment + ".json")) as json_file:
+                bbox_json = json.load(json_file)
+
+            # get calibrated reference depth for this deployment
+            calib_depth = self.get_calib_depth(deployment)
+            
+            for file in os.listdir(input_dir):
+                abs_path = os.path.join(input_dir, file)
+                
+                # check if an image
+                ext = os.path.splitext(file)[1].lower()
+                if not (ext == ".jpg" or ext == ".jpeg" or ext == ".png"):
+                    continue
+                
+                # get detections, and check if animals detected in image
+                detections = []
+                for obj in bbox_json["images"]:
+                    if obj["file"] == abs_path:
+                        detections = list(filter(lambda detection: detection["category"] == "1", obj["detections"]))   # category animal
+                if len(detections) == 0:
+                    continue
+                
+                # run zoedepth
+                print("Getting depth for", deployment, file)
+                # check if depth was already calculated, if so use it and skip zoedepth calculation
+                depth_basename = os.path.splitext(file)[0] + "_raw.png"
+                depth_path = os.path.join(depth_maps_dir, depth_basename)
+                if os.path.exists(depth_path):
+                    with Image.open(depth_path) as depth_img:
+                        depth = np.asarray(depth_img) / 256
+                else:
+                    # run zoedepth to get depth, save raw file
+                    print("Running zoedepth on", deployment, file)
+                    with Image.open(abs_path).convert("RGB") as image:
+                        depth = zoe.infer_pil(image)
+                    save_basename = os.path.splitext(os.path.basename(abs_path))[0] + "_raw.png"
+                    save_path = os.path.join(depth_maps_dir, save_basename)
+                    save_raw_16bit(depth, save_path)
+                
+                # calibrate
+                # lazy calibration
+                norm_depth = (depth - np.mean(depth)) / np.std(depth)
+                depth = np.maximum(0, norm_depth * np.std(calib_depth) + np.mean(calib_depth))
+
+                # extract animal depths and save
+                # we could do this after processing all the files from this deployment, but one file at a time lets you see the results popping up in real time :)
+
+                output = []
+
+                for detection in detections:
+                    # crop depth to bbox
+                    b = detection["bbox"]
+                    h = depth.shape[0]
+                    w = depth.shape[1]
+                    bbox_x = int(w*b[0])
+                    bbox_y = int(h*b[1])
+                    bbox_w = int(w*b[2])
+                    bbox_h = int(h*b[3])
+                    bbox_depth = depth[bbox_y:bbox_y+bbox_h, bbox_x:bbox_x+bbox_w]
+
+                    # get 20th percentile in bbox_depth
+                    depth_estimate = np.percentile(bbox_depth, 20)
+                    # get sampled point
+                    # print(np.where(np.isclose(bbox_depth, depth_estimate)))
+                    output.append({
+                        "deployment": deployment,
+                        "filename": os.path.basename(abs_path),
+                        "animal_depth": depth_estimate,
+                        "bbox_x": bbox_x,
+                        "bbox_y": bbox_y,
+                        "bbox_width": bbox_w,
+                        "bbox_height": bbox_h
+                    })
+
+                self.signals.result.emit(output)
         
-        # run zoedepth
-        for file in os.listdir(self.input_dir):
-            abs_path = os.path.join(self.input_dir, file)
-            
-            # check if an image
-            ext = os.path.splitext(file)[1].lower()
-            if not (ext == ".jpg" or ext == ".jpeg" or ext == ".png"):
-                continue
-            
-            # check if animals detected in image
-            if not self.get_detections(abs_path):
-                continue
-            
-            # check if depth was already calculated, if so use it
-            depth_basename = os.path.splitext(file)[0] + "_raw.png"
-            depth_path = os.path.join(self.depth_maps_dir, depth_basename)
-            if os.path.exists(depth_path):
-                with Image.open(depth_path) as depth_img:
-                    depth = np.asarray(depth_img) / 256
-                self.process_depth(depth, abs_path)
-                continue
-            
-            # run zoedepth to get depth
-            self.main_window.zoe_manager.infer(abs_path, self.zoe_callback)
+        print("DONE!!!!!!!!!!!!!!!!!!!!")
 
-    def get_detections(self, img_abspath):
-        for obj in self.bbox_json["images"]:
-            if os.path.samefile(obj["file"], img_abspath):
-                animal_detections = list(filter(lambda detection: detection["category"] == "1", obj["detections"]))   # category animal
-                return animal_detections if len(animal_detections) > 0 else None
-        return None
 
-    def zoe_callback(self, depth, img_abspath):
-        save_basename = os.path.splitext(os.path.basename(img_abspath))[0] + "_raw.png"
-        save_path = os.path.join(self.depth_maps_dir, save_basename)
-        save_raw_16bit(depth, save_path)
-        self.process_depth(depth, img_abspath)
-    
-    def process_depth(self, depth, img_abspath):
-        print("processing depth", self.deployment, img_abspath)
-
-        output = []
-
-        # get calibrated reference depth
-        rel_depth_path = os.path.join(self.main_window.root_path, self.calibration_json["rel_depth_path"])
+    def get_calib_depth(self, deployment):
+        rel_depth_path = os.path.join(self.root_path, self.calibration_json[deployment]["rel_depth_path"])
         with Image.open(rel_depth_path) as calib_depth_img:
             calib_depth = np.asarray(calib_depth_img) / 256
-        slope = self.calibration_json["slope"]
-        intercept = self.calibration_json["intercept"]
+        slope = self.calibration_json[deployment]["slope"]
+        intercept = self.calibration_json[deployment]["intercept"]
         calib_depth = calib_depth * slope + intercept
+        return calib_depth
 
-        # calibrate
-        # lazy calibration
-        norm_depth = (depth - np.mean(depth)) / np.std(depth)
-        depth = np.maximum(0, norm_depth * np.std(calib_depth) + np.mean(calib_depth))
-
-        detections = self.get_detections(img_abspath)
-
-        for detection in detections:
-            # crop depth to bbox
-            b = detection["bbox"]
-            h = depth.shape[0]
-            w = depth.shape[1]
-            bbox_x = int(w*b[0])
-            bbox_y = int(h*b[1])
-            bbox_w = int(w*b[2])
-            bbox_h = int(h*b[3])
-            bbox_depth = depth[bbox_y:bbox_y+bbox_h, bbox_x:bbox_x+bbox_w]
-
-            # get 20th percentile in bbox_depth
-            depth_estimate = np.percentile(bbox_depth, 20)
-            # get sampled point
-            # print(np.where(np.isclose(bbox_depth, depth_estimate)))
-            output.append({
-                "deployment": self.deployment,
-                "filename": os.path.basename(img_abspath),
-                "animal_depth": depth_estimate,
-                "bbox_x": bbox_x,
-                "bbox_y": bbox_y,
-                "bbox_width": bbox_w,
-                "bbox_height": bbox_h
-            })
-        
-        self.signals.result.emit(output)
             
             
             

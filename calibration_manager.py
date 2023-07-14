@@ -260,6 +260,7 @@ class CalibrationManager:
                 ref_abspath = os.path.join(self.root_path, data["ref_image_path"])
                 depth_abspath = os.path.join(self.root_path, data["rel_depth_path"])
                 if not os.path.exists(ref_abspath) or not os.path.exists(depth_abspath):
+                    print("file missing", deployment)
                     del json_data[deployment]
 
             return json_data

@@ -88,6 +88,8 @@ class ZoeWorker(QRunnable):
 
     def run(self):
         # Do inference
+        print("zoe worker running")
         with Image.open(self.rgb_filename).convert("RGB") as image:
             depth = self.zoe.infer_pil(image)  # as numpy
+            print("zoe worker finished inference")
             self.signals.result.emit(depth)
