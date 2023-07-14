@@ -39,9 +39,9 @@ import run_detector_batch
 
 # TODO
 
-# figure out bug about a zoe worker finishing but the results not getting saved
-# - I have a hunch this is due to running out of threads, or because threads are limited, a DepthEstimationWorker getting deleted after its run() method finishes (but before the zoe results come in)
-# *** essentially, weirdness happening from passing control between depth estimation and zoe QRunnables, should all just be in one
+# automatic cropping
+
+# automatic labeled output as an option (see show_results.py)
 
 # if someone picks a calibration image and then picks a different one, both depth callbacks will occur, but I'm not sure the order is guaranteed
 # - would be nice of having a way to cancel a job. Perhaps using processes works better
@@ -153,7 +153,7 @@ class MainWindow(QMainWindow):
         for path in os.listdir(self.root_path):
             if not os.path.isdir(os.path.join(self.root_path, path)):
                 continue
-            if path == "calibration" or path == "detections" or path == "depth_maps":
+            if path == "calibration" or path == "detections" or path == "depth_maps" or path == "labeled_output":
                 continue
             button = QPushButton("Calibrate")
             button.clicked.connect(functools.partial(self.calibration_manager.init_calibration, path))   # functools for using the current value of item, not whatever it ends up being

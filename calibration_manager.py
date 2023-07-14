@@ -124,9 +124,16 @@ class CalibrationManager:
         self.ref_image_path = os.path.relpath(abs_path, self.main_window.root_path)
         self.init_calibration_image(self.ref_image_path)
 
-        # start relative depth calculation
+        # start relative depth calculation, check for depth map first to avoid recalculation
         self.set_background(self.depth_view, QPixmap())
-        self.main_window.zoe_manager.infer(abs_path, self.process_zoe_result)
+        depth_path = os.path.join(self.calib_dir, f"{self.deployment}_{os.path.splitext(os.path.basename(abs_path))[0]}_raw.png")
+        if os.path.exists(depth_path):
+            self.rel_depth_path = os.path.relpath(depth_path, start=self.root_path)
+            with Image.open(depth_path) as depth_img:
+                self.rel_depth = np.asarray(depth_img) / 256
+            self.display_depth(self.rel_depth)
+        else:
+            self.main_window.zoe_manager.infer(abs_path, self.process_zoe_result)
 
     def init_calibration_image(self, fpath):
         abs_fpath = os.path.join(self.root_path, fpath)
