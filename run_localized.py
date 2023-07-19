@@ -51,10 +51,10 @@ for file in os.listdir(args.input_dir):
         # get bounding box of animal
         bboxs = None
         for img_data in bbox_json['images']:
-            if file != img_data['file']:
+            if file != os.path.basename(img_data['file']):
                 continue
             for detection in img_data['detections']:
-                if detection['conf'] > 0.2:
+                if detection['conf'] > 0.5:
                     print("conf", detection['conf'])
                     if not bboxs:
                         bboxs = []

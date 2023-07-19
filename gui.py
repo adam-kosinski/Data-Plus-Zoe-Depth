@@ -176,34 +176,14 @@ class MainWindow(QMainWindow):
         self.output_rows = []
         
         worker = DepthEstimationWorker(self)
-        worker.signals.result.connect(self.process_animal_depth_results)
         self.threadpool.start(worker)
-    
-    def process_animal_depth_results(self, new_rows):
-        if len(new_rows) == 0:
-            return
-
-        self.output_rows += new_rows
-
-        # sort csv since depths come back in a weird order due to threading
-        self.output_rows.sort(key=lambda obj: obj["filename"])      # secondary sort
-        self.output_rows.sort(key=lambda obj: obj["deployment"])    # primary sort
-
-        # update the output csv
-        output_fpath = os.path.join(self.root_path, "output.csv")
-        with open(output_fpath, 'w', newline='') as csvfile:
-            fieldnames = list(self.output_rows[0].keys())
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in self.output_rows:
-                writer.writerow(row)
 
 
 
 class DepthEstimationSignals(QObject):
     megadetector_done = pyqtSignal(object)  # doesn't carry data, but not providing an argument broke stuff
     # zoedepth_progress = pyqtSignal(int, int)   # current index (starting at 1), total files to process
-    result = pyqtSignal(object)    # contains depth estimates (this signal gets emitted multiple times as more depths come in), MainWindow will do the writing to output file
+    done = pyqtSignal(object)   # doesn't carry data
 
 
 
@@ -230,7 +210,7 @@ class DepthEstimationWorker(QRunnable):
             output_file = os.path.join(detections_dir, deployment + ".json")
             if not os.path.exists(output_file):
                 input_dir = os.path.join(self.root_path, deployment)
-                arg_string = f"megadetector_weights/md_v5a.0.0.pt {input_dir} {output_file} --threshold 0.2"
+                arg_string = f"megadetector_weights/md_v5a.0.0.pt {input_dir} {output_file} --threshold 0.5"
                 run_detector_batch.main(arg_string)
             print("Megadetector done with deployment", deployment)
         
@@ -241,11 +221,8 @@ class DepthEstimationWorker(QRunnable):
 
         # run zoedepth and get animal distances
 
-        # build zoedepth model
-        # first arg to torch hub load is repository root, which because of copying datas in the spec file will be the folder where the executable runs
-        model_zoe_nk = torch.hub.load(os.path.dirname(__file__), "ZoeD_NK", source="local", pretrained=True, config_mode="eval")
-        DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-        zoe = model_zoe_nk.to(DEVICE)
+        # by default, don't load zoedepth, only load it if we need it
+        zoe = None
 
         for deployment in self.calibration_json:
 
@@ -284,6 +261,14 @@ class DepthEstimationWorker(QRunnable):
                         depth = np.asarray(depth_img) / 256
                 else:
                     # run zoedepth to get depth, save raw file
+                    # load zoedepth if this is the first time we're using it
+                    if not zoe:
+                        print("Loading ZoeDepth")
+                        # first arg to torch hub load is repository root, which because of copying datas in the spec file will be the folder where the executable runs
+                        model_zoe_nk = torch.hub.load(os.path.dirname(__file__), "ZoeD_NK", source="local", pretrained=True, config_mode="eval")
+                        DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+                        zoe = model_zoe_nk.to(DEVICE)
+
                     print("Running zoedepth on", deployment, file)
                     with Image.open(abs_path).convert("RGB") as image:
                         depth = zoe.infer_pil(image)
@@ -314,8 +299,15 @@ class DepthEstimationWorker(QRunnable):
 
                     # get 20th percentile in bbox_depth
                     depth_estimate = np.percentile(bbox_depth, 20)
-                    # get sampled point
-                    # print(np.where(np.isclose(bbox_depth, depth_estimate)))
+                    # get sampled point (point with depth value = depth estimate, that's closest to bbox center)
+                    ys, xs = np.where(np.isclose(bbox_depth, depth_estimate))
+                    dxs = xs - bbox_w/2
+                    dys = ys - bbox_h/2
+                    dists_to_center = np.hypot(dxs, dys)
+                    idx = np.argmin(dists_to_center)
+                    sample_x = bbox_x + xs[idx]
+                    sample_y = bbox_y + ys[idx]
+                    
                     output.append({
                         "deployment": deployment,
                         "filename": os.path.basename(abs_path),
@@ -323,12 +315,29 @@ class DepthEstimationWorker(QRunnable):
                         "bbox_x": bbox_x,
                         "bbox_y": bbox_y,
                         "bbox_width": bbox_w,
-                        "bbox_height": bbox_h
+                        "bbox_height": bbox_h,
+                        "sample_x": sample_x,
+                        "sample_y": sample_y
                     })
 
-                self.signals.result.emit(output)
+                # write results
+
+                if len(output) == 0:
+                    continue
+
+                self.main_window.output_rows += output
+
+                # update the output csv
+                output_fpath = os.path.join(self.root_path, "output.csv")
+                with open(output_fpath, 'w', newline='') as csvfile:
+                    fieldnames = list(output[0].keys())
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    writer.writeheader()
+                    for row in self.main_window.output_rows:
+                        writer.writerow(row)
         
         print("DONE!!!!!!!!!!!!!!!!!!!!")
+        self.signals.done.emit(None)
 
 
     def get_calib_depth(self, deployment):
