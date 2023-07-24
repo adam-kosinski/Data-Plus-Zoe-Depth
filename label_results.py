@@ -3,16 +3,16 @@ import csv
 import os
 import argparse
 import numpy as np
-import json
 from zoedepth.utils.misc import colorize
 
 
-def label_results(root_path, csv_file="output.csv", dest_folder="labeled_output"):
+def label_results(root_path, csv_filepath="output.csv", dest_folder="labeled_output"):
+    # file and dest folder are relative to the root path
 
     seen_rgb_already = []
     seen_depth_already = []
 
-    with open(os.path.join(root_path, "output.csv"), newline='') as csvfile:
+    with open(os.path.join(root_path, csv_filepath), newline='') as csvfile:
         rowreader = csv.DictReader(csvfile)
         for row in rowreader:
             

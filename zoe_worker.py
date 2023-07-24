@@ -90,6 +90,7 @@ class ZoeDepthResultSignal(QObject):
 
 
 class ZoeWorker(QRunnable):
+    # convenience runnable, if code is already in a separate thread it can just run zoedepth itself
     def __init__(self, main_window, rgb_filename):
         super().__init__()
         self.main_window = main_window
