@@ -70,7 +70,6 @@ class DepthEstimationWorker(QRunnable):
         # run zoedepth, segmentation, and get animal distances
 
         # by default, don't load zoedepth, only load it if we need it
-        zoe = None
 
         for deployment in self.calibration_json:
             inference_files = inference_file_dict[deployment]

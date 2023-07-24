@@ -11,6 +11,7 @@ from zoe_worker import ZoeWorker
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QMainWindow,
     QHBoxLayout,
     QFileDialog,
     QMessageBox,
@@ -22,6 +23,9 @@ from PyQt6.QtWidgets import (
     QLineEdit
 )
 from PyQt6.QtGui import QPixmap, QPen, QPainter, QDoubleValidator, QFont
+
+
+PIXMAP_WIDTH = 400
 
 
 class CalibrationManager:
@@ -55,6 +59,8 @@ class CalibrationManager:
         self.scene.mousePressEvent = self.scene_mouse_press
         main_window.backToMainButton.clicked.connect(self.exit_calibration)
         main_window.saveCalibrationButton.clicked.connect(self.save)
+        self.depth_view.setMouseTracking(True)
+        self.depth_view.mouseMoveEvent = self.depth_view_mouse_move
 
         # set up other stuff and state via the reset function
         self.calibration_entries = []
@@ -164,7 +170,7 @@ class CalibrationManager:
 
     def display_depth(self, depth):
         self.depth_view.setScene(self.scene)
-        self.set_background(self.depth_view, depth_to_pixmap(depth, rescale_width=400))
+        self.set_background(self.depth_view, depth_to_pixmap(depth, rescale_width=PIXMAP_WIDTH))
 
     def set_background(self, graphics_view, pixmap):
         graphics_view.drawBackground = lambda painter, rect: painter.drawPixmap(rect, pixmap, rect)
@@ -234,7 +240,7 @@ class CalibrationManager:
 
         # correct the depth map
         corrected = np.maximum(0.0, self.rel_depth * self.slope + self.intercept)
-        self.set_background(self.depth_view, depth_to_pixmap(corrected, rescale_width=400))
+        self.set_background(self.depth_view, depth_to_pixmap(corrected, rescale_width=PIXMAP_WIDTH))
 
         # update deployment json
         self.saved = False
@@ -251,6 +257,26 @@ class CalibrationManager:
             } for i in range(len(b))]
         }
 
+    def depth_view_mouse_move(self, e):
+        QGraphicsView.mouseMoveEvent(self.depth_view, e)
+        # check if relative depth is loaded yet
+        if not isinstance(self.rel_depth, np.ndarray):
+            return
+        
+        coords = self.depth_view.mapToScene(e.position().toPoint())
+        
+        aspect_ratio = self.rel_depth.shape[1] / self.rel_depth.shape[0]
+        x = math.floor(self.rel_depth.shape[1] * coords.x() / PIXMAP_WIDTH)
+        y = math.floor(self.rel_depth.shape[0] * coords.y() / (PIXMAP_WIDTH / aspect_ratio))
+        if x < 0 or x >= self.rel_depth.shape[1] or y < 0 or y >= self.rel_depth.shape[0]:
+            return
+        depth_val = round(self.rel_depth[y][x], 1)
+        
+        box = self.main_window.calibrationDepthTooltip
+        dest = box.parentWidget().mapFromGlobal(e.globalPosition())
+        box.move(int(dest.x()) + 20, int(dest.y()) + 10)
+        self.main_window.calibrationDepthTooltipLabel.setText(f"{depth_val} m ")
+        box.parentWidget().update() # needed to prevent visual artifacts
 
     def set_root_path(self, root_path):
         self.root_path = root_path

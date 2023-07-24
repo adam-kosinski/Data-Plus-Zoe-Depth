@@ -76,7 +76,6 @@ class MainWindow(QMainWindow):
         self.threadpool = QThreadPool()
 
         self.calibration_manager = CalibrationManager(self)
-        # self.zoe_manager = ZoeManager(self)
         self.zoedepth_model = None
 
         self.deployment_hboxes = {} # keep references to these so we can move them between the uncalibrated and calibrated lists
@@ -90,26 +89,9 @@ class MainWindow(QMainWindow):
 
         # temp
         # self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
-        # with Image.open("second_results/calibrated/RCNX0332_raw.png") as raw_img:
-        #     self.data = np.asarray(raw_img) / 256
-        #     self.pixmap = depth_to_pixmap(self.data, rescale_width=400)
-        #     self.imgDisplay.setPixmap(self.pixmap)
-        
-        # self.imgDisplay.setMouseTracking(True)
-        # self.imgDisplay.mouseMoveEvent = self.update_dist
-        
         self.resize(QSize(800, 600))
     
-    # def update_dist(self, e):
-    #     rect = self.pixmap.rect()
-    #     x = math.floor(self.data.shape[1] * e.position().x() / rect.width())
-    #     y = math.floor(self.data.shape[0] * e.position().y() / rect.height())
-    #     depth_val = round(self.data[y][x], 1)
-
-    #     box = self.meterContainer
-    #     dest = box.parentWidget().mapFromGlobal(e.globalPosition())
-    #     box.move(int(dest.x()) + 20, int(dest.y()) + 10)
-    #     self.meterDisplay.setText(f"{depth_val} m ")
+    
         
 
     def open_root_folder(self, root_path=None):
