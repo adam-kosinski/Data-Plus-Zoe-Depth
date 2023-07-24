@@ -6,6 +6,7 @@ import json
 
 from gui_utils import clear_layout_contents, depth_to_pixmap
 from zoedepth.utils.misc import save_raw_16bit
+from zoe_worker import ZoeWorker
 
 
 from PyQt6.QtCore import Qt
@@ -133,7 +134,9 @@ class CalibrationManager:
                 self.rel_depth = np.asarray(depth_img) / 256
             self.display_depth(self.rel_depth)
         else:
-            self.main_window.zoe_manager.infer(abs_path, self.process_zoe_result)
+            worker = ZoeWorker(self.main_window, abs_path)
+            worker.signals.result.connect(self.process_zoe_result)
+            self.main_window.threadpool.start(worker)
 
     def init_calibration_image(self, fpath):
         abs_fpath = os.path.join(self.root_path, fpath)

@@ -96,7 +96,8 @@ for file in os.listdir(args.input_dir):
                 max(0, b['x'] - padding),
                 max(0, b['y'] - padding),
                 min(w, b['x'] + b['width'] + padding),
-                min(h, b['y'] + b['height'] + padding)
+                h
+                # min(h, b['y'] + b['height'] + padding)
             )
             local_img = img.crop(padded_box)
 

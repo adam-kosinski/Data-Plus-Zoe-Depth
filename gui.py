@@ -27,7 +27,7 @@ from PyQt6 import uic
 
 from gui_utils import clear_layout_contents, depth_to_pixmap
 from calibration_manager import CalibrationManager
-from zoe_manager import ZoeManager
+from zoe_worker import build_zoedepth_model
 from zoedepth.utils.misc import save_raw_16bit, colorize
 import run_segmentation
 
@@ -42,19 +42,17 @@ import run_detector_batch
 
 # automatic cropping
 
-# automatic labeled output as an option (see show_results.py)
+# if implement localized method, make sure it supports any image size (padding shouldn't be fixed)
+
+# automatic labeled output as an option (see label_results.py)
+
+# bundle the zoedepth weights with the build, instead of downloading from the internet, to remove dependence on the internet download
 
 # make deployments its own folder, so we don't have to check for our created folders
 
 # if someone picks a calibration image and then picks a different one, both depth callbacks will occur, but I'm not sure the order is guaranteed
 # - would be nice of having a way to cancel a job. Perhaps using processes works better
 # - or just disconnect the result signal, zoedepth will finish but won't do anything with its output
-
-# share the threadpool, but somehow give zoedepth priority over depth estimation threads so they don't wait on each other to finish
-# - or just better understand how two threadpools work
-
-# Consider having multiple zoe managers for potential speed-up? Since it didn't work so well using one manager for multiple threads
-# - probably there was weirdness with multiple models trying to access the manager's zoe model object at the same time
 
 # zoedepth calibration image computation slow? I wonder if you can pick default calibration images (e.g. first image in deployment) ahead of time and start processing in the background
 # or - should be able to save a calibration without depth computed yet, and have the depth + linear regression finishing computing in a thread somewhere
@@ -84,6 +82,8 @@ SEGMENTATION_RESIZE_FACTOR = 4
 
 
 
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -96,6 +96,7 @@ class MainWindow(QMainWindow):
 
         self.calibration_manager = CalibrationManager(self)
         # self.zoe_manager = ZoeManager(self)
+        self.zoedepth_model = None
 
         self.deployment_hboxes = {} # keep references to these so we can move them between the uncalibrated and calibrated lists
 
@@ -107,7 +108,7 @@ class MainWindow(QMainWindow):
 
 
         # temp
-        self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
+        # self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
         # with Image.open("second_results/calibrated/RCNX0332_raw.png") as raw_img:
         #     self.data = np.asarray(raw_img) / 256
         #     self.pixmap = depth_to_pixmap(self.data, rescale_width=400)
@@ -278,16 +279,13 @@ class DepthEstimationWorker(QRunnable):
                 else:
                     # run zoedepth to get depth, save raw file
                     # load zoedepth if this is the first time we're using it
-                    if not zoe:
+                    if not self.main_window.zoedepth_model:
                         print("Loading ZoeDepth")
-                        # first arg to torch hub load is repository root, which because of copying datas in the spec file will be the folder where the executable runs
-                        model_zoe_nk = torch.hub.load(os.path.dirname(__file__), "ZoeD_NK", source="local", pretrained=True, config_mode="eval")
-                        DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-                        zoe = model_zoe_nk.to(DEVICE)
+                        self.main_window.zoedepth_model = build_zoedepth_model()
 
                     print("Running zoedepth on", image_abs_path)
                     with Image.open(image_abs_path).convert("RGB") as image:
-                        depth = zoe.infer_pil(image)
+                        depth = self.main_window.zoedepth_model.infer_pil(image)
                     save_basename = os.path.splitext(os.path.basename(image_abs_path))[0] + "_raw.png"
                     save_path = os.path.join(depth_maps_dir, save_basename)
                     save_raw_16bit(depth, save_path)
@@ -303,6 +301,7 @@ class DepthEstimationWorker(QRunnable):
                 output = []
 
                 for detection in detections:
+                    
                     # crop depth to bbox
                     b = detection["bbox"]
                     h = depth.shape[0]
