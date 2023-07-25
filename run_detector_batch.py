@@ -610,7 +610,7 @@ if False:
     
 #%% Command-line driver
 
-def main(arg_string=None):
+def main(args=[]):
     
     parser = argparse.ArgumentParser(
         description='Module to run a TF/PT animal detection model on lots of images')
@@ -691,8 +691,8 @@ def main(arg_string=None):
             'int-strings to strings.  This will also disable the addition of "1" to all category ' + \
             'IDs, so your class mapping should start at zero.')
     
-    if arg_string:
-        args = parser.parse_args(arg_string.split())
+    if len(args) > 0:
+        args = parser.parse_args(args)
     else:
         if len(sys.argv[1:]) == 0:
             parser.print_help()

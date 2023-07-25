@@ -132,7 +132,7 @@ class CalibrationManager:
             self.intercept = data["intercept"]
 
             # load reference image
-            self.init_calibration_image(self.ref_image_path)
+            self.init_calibration_reference_image(self.ref_image_path)
 
             # load depth
             depth_abspath = os.path.join(self.root_path, self.rel_depth_path)
@@ -154,10 +154,14 @@ class CalibrationManager:
         
         abs_path = dialog.selectedFiles()[0]
         self.ref_image_path = os.path.relpath(abs_path, self.root_path)
-        self.init_calibration_image(self.ref_image_path)
+        self.init_calibration_reference_image(self.ref_image_path)
 
         # start relative depth calculation, check for depth map first to avoid recalculation
         self.set_background(self.depth_view, QPixmap())
+        self.depth_view.setScene(self.loading_depth_scene)
+        self.rel_depth_path = None
+        self.rel_depth = None
+
         depth_path = os.path.join(self.calib_dir, f"{self.deployment}_{os.path.splitext(os.path.basename(abs_path))[0]}_raw.png")
         if os.path.exists(depth_path):
             self.rel_depth_path = os.path.relpath(depth_path, start=self.root_path)
@@ -169,7 +173,7 @@ class CalibrationManager:
             worker.signals.result.connect(self.process_zoe_result)
             self.main_window.threadpool.start(worker)
 
-    def init_calibration_image(self, fpath):
+    def init_calibration_reference_image(self, fpath):
         abs_fpath = os.path.join(self.root_path, fpath)
 
         # display pixmap background
@@ -182,7 +186,6 @@ class CalibrationManager:
         # update scenes
         self.scene.setSceneRect(self.ref_pixmap.rect().toRectF())   # limits point drag range
         self.ref_view.setScene(self.scene)
-        self.depth_view.setScene(self.loading_depth_scene)
     
     def process_zoe_result(self, depth, abs_fpath):
         # save
@@ -207,6 +210,8 @@ class CalibrationManager:
         if e.isAccepted():
             return
         pos = e.scenePos()
+        if not self.scene.sceneRect().contains(pos):
+            return
         self.add_calibration_entry(pos.x(), pos.y())
 
     def add_calibration_entry(self, x, y, distance=None):
@@ -339,7 +344,7 @@ class CalibrationManager:
             return json_data
         return {}
 
-    def save(self):        
+    def save(self):
         json_data = self.get_json()
         json_data[self.deployment] = self.deployment_json
         with open(self.json_path, "w") as json_file:
@@ -349,6 +354,10 @@ class CalibrationManager:
         hbox = self.main_window.deployment_hboxes[self.deployment]
         hbox.setParent(None)
         self.main_window.calibratedDeployments.addLayout(hbox)
+
+        # These two lines break stuff, no idea why
+        # button = hbox.takeAt(0).widget()
+        # button.setText("Edit Calibration")
         
         self.saved = True
         self.main_window.saveCalibrationButton.setEnabled(False)

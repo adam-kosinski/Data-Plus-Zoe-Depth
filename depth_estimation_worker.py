@@ -25,7 +25,9 @@ SEGMENTATION_RESIZE_FACTOR = 4
 
 class DepthEstimationSignals(QObject):
     megadetector_done = pyqtSignal(object)  # doesn't carry data, but not providing an argument broke stuff
-    # zoedepth_progress = pyqtSignal(int, int)   # current index (starting at 1), total files to process
+    start_deployment = pyqtSignal(str)  # string with deployment name
+
+    zoedepth_progress = pyqtSignal(int, int)   # current index (starting at 1), total files to process
     done = pyqtSignal(object)   # doesn't carry data
 
 
@@ -60,8 +62,8 @@ class DepthEstimationWorker(QRunnable):
             output_file = os.path.join(detections_dir, deployment + ".json")
             if not os.path.exists(output_file):
                 input_dir = os.path.join(self.deployments_dir, deployment)
-                arg_string = f"megadetector_weights/md_v5a.0.0.pt {input_dir} {output_file} --threshold 0.5"
-                run_detector_batch.main(arg_string)
+                args = ["megadetector_weights/md_v5a.0.0.pt", input_dir, output_file, "--threshold", "0.5"]
+                run_detector_batch.main(args)
             print("Megadetector done with deployment", deployment)
         
         print("Megadetector done")
@@ -81,7 +83,11 @@ class DepthEstimationWorker(QRunnable):
             depth_maps_dir = os.path.join(self.root_path, "depth_maps", deployment)
             os.makedirs(segmentation_dir, exist_ok=True)
             os.makedirs(depth_maps_dir, exist_ok=True)
-            with open(os.path.join(detections_dir, deployment + ".json")) as json_file:
+
+            detection_json_path = os.path.join(detections_dir, deployment + ".json")
+            if not os.path.exists(detection_json_path):
+                continue
+            with open(detection_json_path) as json_file:
                 bbox_json = json.load(json_file)
 
             # get calibrated reference depth for this deployment
@@ -98,7 +104,7 @@ class DepthEstimationWorker(QRunnable):
                 ext = os.path.splitext(image_abs_path)[1].lower()
                 if not (ext == ".jpg" or ext == ".jpeg" or ext == ".png"):
                     continue
-                
+
                 # get detections, and skip this image if no animals detected
                 detections = []
                 for obj in bbox_json["images"]:
@@ -211,8 +217,9 @@ class DepthEstimationWorker(QRunnable):
                     for row in self.main_window.csv_output_rows:
                         writer.writerow(row)
         
-
-        label_results(self.root_path)
+        output_fpath = os.path.join(self.root_path, "output.csv")
+        if os.path.exists(output_fpath):
+            label_results(self.root_path, output_fpath)
         
         print("DONE!!!!!!!!!!!!!!!!!!!!")
         self.signals.done.emit(None)

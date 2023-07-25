@@ -48,7 +48,6 @@ def is_night(pil_image):
 
 
 def type1_preprocess(pil_image, beta=0):
-    print("type 1 preprocess")
     gray_image = np.asarray(pil_image.convert("L"))
     equalized_image = equalize_hist(gray_image) * 255
     equalized_image = equalized_image.astype(int)
@@ -63,7 +62,6 @@ def type1_preprocess(pil_image, beta=0):
 
 
 def type2_preprocess(pil_image, beta=0.35):
-    print("type 2 preprocess")
     gray_image = np.asarray(pil_image.convert("L"))
     blurred_image = filters.gaussian(gray_image, sigma=0.5, preserve_range=True).astype(int)
 
@@ -90,6 +88,8 @@ def main(input_dir, output_dir=None, resize_factor=4, save_steps=False, inferenc
     gray_image_shape = None
 
     # Load and preprocess images
+    print("Segmentation on ", input_dir)
+    print("Preprocessing images")
 
     for file in os.listdir(input_dir):
         fpath = os.path.join(input_dir, file)
@@ -97,7 +97,6 @@ def main(input_dir, output_dir=None, resize_factor=4, save_steps=False, inferenc
         if os.path.isdir(file) or not(ext == ".png" or ext == ".jpg" or ext == ".jpeg"):
             continue
 
-        print(file)
         filenames.append(file)
 
         with Image.open(fpath) as image:
@@ -116,11 +115,12 @@ def main(input_dir, output_dir=None, resize_factor=4, save_steps=False, inferenc
 
     # Prep data matrix and do RPCA
 
+    print("Running RPCA")
     M = np.hstack(vectors)
     print(M.shape)
     rpca = R_pca(M)
     L, S = rpca.fit(max_iter=5, iter_print=1)
-    print("rpca done")
+    print("RPCA done, saving segmentation masks")
 
 
     # post processing and save
@@ -134,7 +134,6 @@ def main(input_dir, output_dir=None, resize_factor=4, save_steps=False, inferenc
             continue
 
         save_filename = os.path.splitext(filenames[i])[0] + ".png"
-        print(save_filename)
 
         sparse_img = np.reshape(S[:,i], gray_image_shape)
 
@@ -155,6 +154,7 @@ def main(input_dir, output_dir=None, resize_factor=4, save_steps=False, inferenc
         save_abs_path = os.path.abspath(save_path)
         out_dictionary[orig_abs_path] = save_abs_path
     
+    print("Segmentation done")
     return out_dictionary
 
 

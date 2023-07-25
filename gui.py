@@ -71,6 +71,7 @@ class MainWindow(QMainWindow):
         self.zoedepth_model = None
 
         self.deployment_hboxes = {} # keep references to these so we can move them between the uncalibrated and calibrated lists
+        self.is_deployment_calibrated = {}  # deployment: bool (whether calibrated)
 
         self.csv_output_rows = []
 
@@ -80,7 +81,7 @@ class MainWindow(QMainWindow):
 
 
         # temp
-        self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
+        self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/test")
         self.resize(QSize(800, 600))
     
     
@@ -108,13 +109,12 @@ class MainWindow(QMainWindow):
         clear_layout_contents(self.calibratedDeployments)
         self.deployment_hboxes = {}
 
-        json_data = self.calibration_manager.get_json()
+        calibration_json = self.calibration_manager.get_json()
         
         for deployment in os.listdir(self.deployments_dir):
-            print(deployment)
             if not os.path.isdir(os.path.join(self.deployments_dir, deployment)):
                 continue
-            button = QPushButton("Calibrate")
+            button = QPushButton()
             button.clicked.connect(functools.partial(self.calibration_manager.init_calibration, deployment))   # functools for using the current value of item, not whatever it ends up being
             hbox = QHBoxLayout()
             self.deployment_hboxes[deployment] = hbox
@@ -122,10 +122,14 @@ class MainWindow(QMainWindow):
             hbox.addWidget(button)
             hbox.addWidget(QLabel(deployment))
             hbox.addStretch()
-            if deployment in json_data:
+            if deployment in calibration_json:
                 self.calibratedDeployments.addLayout(hbox)
+                self.is_deployment_calibrated[deployment] = True
+                button.setText("Edit Calibration")
             else:
                 self.uncalibratedDeployments.addLayout(hbox)
+                self.is_deployment_calibrated[deployment] = False
+                button.setText("Calibrate")
     
     def run_depth_estimation(self):
         # self.runButton.setEnabled(False)
