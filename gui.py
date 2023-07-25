@@ -72,6 +72,7 @@ class MainWindow(QMainWindow):
         uic.loadUi(ui_path, self)
 
         self.root_path = None
+        self.deployments_dir = None
 
         self.threadpool = QThreadPool()
 
@@ -80,7 +81,7 @@ class MainWindow(QMainWindow):
 
         self.deployment_hboxes = {} # keep references to these so we can move them between the uncalibrated and calibrated lists
 
-        self.output_rows = []
+        self.csv_output_rows = []
 
         # event listeners
         self.openRootFolder.clicked.connect(self.open_root_folder)
@@ -88,7 +89,7 @@ class MainWindow(QMainWindow):
 
 
         # temp
-        # self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
+        self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
         self.resize(QSize(800, 600))
     
     
@@ -105,8 +106,9 @@ class MainWindow(QMainWindow):
             self.root_path = dialog.selectedFiles()[0]
 
         self.root_path = os.path.normpath(self.root_path)    # normpath to keep slashses standardized, in case that matters
+        self.deployments_dir = os.path.join(self.root_path, "deployments")
         self.rootFolderLabel.setText(self.root_path)
-        self.calibration_manager.set_root_path(self.root_path)
+        self.calibration_manager.update_root_path()
         print(self.root_path)
         
         # display deployments
@@ -117,20 +119,19 @@ class MainWindow(QMainWindow):
 
         json_data = self.calibration_manager.get_json()
         
-        for path in os.listdir(self.root_path):
-            if not os.path.isdir(os.path.join(self.root_path, path)):
-                continue
-            if path == "calibration" or path == "detections" or path == "depth_maps" or path == "segmentation" or path == "labeled_output":
+        for deployment in os.listdir(self.deployments_dir):
+            print(deployment)
+            if not os.path.isdir(os.path.join(self.deployments_dir, deployment)):
                 continue
             button = QPushButton("Calibrate")
-            button.clicked.connect(functools.partial(self.calibration_manager.init_calibration, path))   # functools for using the current value of item, not whatever it ends up being
+            button.clicked.connect(functools.partial(self.calibration_manager.init_calibration, deployment))   # functools for using the current value of item, not whatever it ends up being
             hbox = QHBoxLayout()
-            self.deployment_hboxes[path] = hbox
-            hbox.widget_name = "deployment_" + path + "_hbox"
+            self.deployment_hboxes[deployment] = hbox
+            hbox.widget_name = "deployment_" + deployment + "_hbox"
             hbox.addWidget(button)
-            hbox.addWidget(QLabel(path))
+            hbox.addWidget(QLabel(deployment))
             hbox.addStretch()
-            if path in json_data:
+            if deployment in json_data:
                 self.calibratedDeployments.addLayout(hbox)
             else:
                 self.uncalibratedDeployments.addLayout(hbox)
@@ -140,7 +141,7 @@ class MainWindow(QMainWindow):
         print("RUNNING DEPTH ESTIMATION ===============================")
 
         # reset rows so we don't get duplicates
-        self.output_rows = []
+        self.csv_output_rows = []
         
         worker = DepthEstimationWorker(self)
         self.threadpool.start(worker)

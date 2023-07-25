@@ -33,6 +33,12 @@ class CalibrationManager:
     def __init__(self, main_window):
 
         self.main_window = main_window
+
+        # path references, see self.update_root_path()
+        self.root_path = None
+        self.deployments_dir = None
+        self.calib_dir = None
+        self.json_path = None
         
         # make scenes and init views
         self.scene = QGraphicsScene(0,0,400,200)
@@ -139,7 +145,7 @@ class CalibrationManager:
                 self.add_calibration_entry(point["x"], point["y"], point["distance"])
         
     def choose_ref_image(self):
-        open_directory = os.path.join(self.root_path, self.deployment)
+        open_directory = os.path.join(self.deployments_dir, self.deployment)
         dialog = QFileDialog(parent=self.main_window, caption="Choose Reference Image", directory=open_directory)
         dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
         dialog.setNameFilter("*.jpg *.jpeg *.png")
@@ -147,7 +153,7 @@ class CalibrationManager:
             return
         
         abs_path = dialog.selectedFiles()[0]
-        self.ref_image_path = os.path.relpath(abs_path, self.main_window.root_path)
+        self.ref_image_path = os.path.relpath(abs_path, self.root_path)
         self.init_calibration_image(self.ref_image_path)
 
         # start relative depth calculation, check for depth map first to avoid recalculation
@@ -305,8 +311,9 @@ class CalibrationManager:
     def depth_view_leave_event(self, e):
         self.depth_tooltip_box.hide()
 
-    def set_root_path(self, root_path):
-        self.root_path = root_path
+    def update_root_path(self):
+        self.root_path = self.main_window.root_path
+        self.deployments_dir = self.main_window.deployments_dir
         self.calib_dir = os.path.join(self.root_path, "calibration")
         self.json_path = os.path.join(self.calib_dir, "calibrations.json")
         os.makedirs(self.calib_dir, exist_ok=True)
@@ -323,7 +330,7 @@ class CalibrationManager:
                 ref_abspath = os.path.join(self.root_path, data["ref_image_path"])
                 depth_abspath = os.path.join(self.root_path, data["rel_depth_path"])
                 if not os.path.exists(ref_abspath) or not os.path.exists(depth_abspath):
-                    print("file missing", deployment)
+                    print("calibration file missing for", deployment)
                     del json_data[deployment]
 
             return json_data

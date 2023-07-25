@@ -24,7 +24,7 @@ def label_results(root_path, csv_filepath="output.csv", dest_folder="labeled_out
             rgb_output_file = os.path.join(root_path, dest_folder, row['deployment'], row['filename'])
             print(rgb_output_file)
 
-            rgb_file_to_open = rgb_output_file if rgb_output_file in seen_rgb_already else os.path.join(root_path, row['deployment'], row['filename'])
+            rgb_file_to_open = rgb_output_file if rgb_output_file in seen_rgb_already else os.path.join(root_path, "deployments", row['deployment'], row['filename'])
             with Image.open(rgb_file_to_open) as image:
                 draw_annotations(image, row)
                 image.save(rgb_output_file)

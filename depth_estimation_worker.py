@@ -10,6 +10,7 @@ from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
 from zoe_worker import build_zoedepth_model
 from zoedepth.utils.misc import save_raw_16bit
 import run_segmentation
+from label_results import label_results
 
 # megadetector stuff
 import sys
@@ -34,6 +35,7 @@ class DepthEstimationWorker(QRunnable):
         super().__init__()
         self.main_window = main_window
         self.root_path = main_window.root_path
+        self.deployments_dir = main_window.deployments_dir
         self.calibration_json = main_window.calibration_manager.get_json()
 
         self.signals = DepthEstimationSignals()
@@ -57,7 +59,7 @@ class DepthEstimationWorker(QRunnable):
             
             output_file = os.path.join(detections_dir, deployment + ".json")
             if not os.path.exists(output_file):
-                input_dir = os.path.join(self.root_path, deployment)
+                input_dir = os.path.join(self.deployments_dir, deployment)
                 arg_string = f"megadetector_weights/md_v5a.0.0.pt {input_dir} {output_file} --threshold 0.5"
                 run_detector_batch.main(arg_string)
             print("Megadetector done with deployment", deployment)
@@ -74,7 +76,7 @@ class DepthEstimationWorker(QRunnable):
         for deployment in self.calibration_json:
             inference_files = inference_file_dict[deployment]
 
-            input_dir = os.path.join(self.root_path, deployment)
+            input_dir = os.path.join(self.deployments_dir, deployment)
             segmentation_dir = os.path.join(self.root_path, "segmentation", deployment)
             depth_maps_dir = os.path.join(self.root_path, "depth_maps", deployment)
             os.makedirs(segmentation_dir, exist_ok=True)
@@ -198,7 +200,7 @@ class DepthEstimationWorker(QRunnable):
                 if len(output) == 0:
                     continue
 
-                self.main_window.output_rows += output
+                self.main_window.csv_output_rows += output
 
                 # update the output csv
                 output_fpath = os.path.join(self.root_path, "output.csv")
@@ -206,8 +208,11 @@ class DepthEstimationWorker(QRunnable):
                     fieldnames = list(output[0].keys())
                     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                     writer.writeheader()
-                    for row in self.main_window.output_rows:
+                    for row in self.main_window.csv_output_rows:
                         writer.writerow(row)
+        
+
+        label_results(self.root_path)
         
         print("DONE!!!!!!!!!!!!!!!!!!!!")
         self.signals.done.emit(None)
@@ -218,11 +223,11 @@ class DepthEstimationWorker(QRunnable):
         # some are there just to help the segmentation work better
         # this function returns a list of absolute image paths that we want to do inference on
         inference_files = []
-        deployment_dir = os.path.join(self.root_path, deployment)
-        for file in os.listdir(deployment_dir):
+        input_dir = os.path.join(self.deployments_dir, deployment)
+        for file in os.listdir(input_dir):
             s = os.path.splitext(file)[0]
             if "-" not in s:
-                inference_files.append(os.path.abspath(os.path.join(deployment_dir, file)))
+                inference_files.append(os.path.abspath(os.path.join(input_dir, file)))
         return inference_files
 
 
