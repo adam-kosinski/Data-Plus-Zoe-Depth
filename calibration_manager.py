@@ -11,7 +11,8 @@ from zoe_worker import ZoeWorker
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QMainWindow,
+    QWidget,
+    QLabel,
     QHBoxLayout,
     QFileDialog,
     QMessageBox,
@@ -22,7 +23,7 @@ from PyQt6.QtWidgets import (
     QGraphicsEllipseItem,
     QLineEdit
 )
-from PyQt6.QtGui import QPixmap, QPen, QPainter, QDoubleValidator, QFont
+from PyQt6.QtGui import QPixmap, QPen, QPainter, QDoubleValidator, QFont, QPalette, QColor
 
 
 PIXMAP_WIDTH = 400
@@ -54,6 +55,23 @@ class CalibrationManager:
         # widget references
         self.vbox = main_window.calibrationList
 
+
+        # depth view hover tooltip - doing this in code, b/c couldn't figure out how to do it in the UI without adding it to a layout
+        self.depth_tooltip_box = QWidget()
+        self.depth_tooltip_box.setFixedSize(40, 20)
+        self.depth_tooltip_box.setAutoFillBackground(True)
+        palette = main_window.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor("white"))
+        self.depth_tooltip_box.setPalette(palette)
+        self.depth_tooltip_box.hide()
+
+        self.depth_tooltip_label = QLabel()
+        self.depth_tooltip_label.setFixedSize(40, 20)
+
+        self.depth_tooltip_label.setParent(self.depth_tooltip_box)
+        self.depth_tooltip_box.setParent(self.main_window.calibrationScreen)
+
+
         # event listeners
         main_window.openCalibrationImageButton.clicked.connect(self.choose_ref_image)
         self.scene.mousePressEvent = self.scene_mouse_press
@@ -61,6 +79,7 @@ class CalibrationManager:
         main_window.saveCalibrationButton.clicked.connect(self.save)
         self.depth_view.setMouseTracking(True)
         self.depth_view.mouseMoveEvent = self.depth_view_mouse_move
+        self.depth_view.leaveEvent = self.depth_view_leave_event
 
         # set up other stuff and state via the reset function
         self.calibration_entries = []
@@ -259,8 +278,12 @@ class CalibrationManager:
 
     def depth_view_mouse_move(self, e):
         QGraphicsView.mouseMoveEvent(self.depth_view, e)
+
+        box = self.depth_tooltip_box
+
         # check if relative depth is loaded yet
         if not isinstance(self.rel_depth, np.ndarray):
+            box.hide()
             return
         
         coords = self.depth_view.mapToScene(e.position().toPoint())
@@ -269,14 +292,18 @@ class CalibrationManager:
         x = math.floor(self.rel_depth.shape[1] * coords.x() / PIXMAP_WIDTH)
         y = math.floor(self.rel_depth.shape[0] * coords.y() / (PIXMAP_WIDTH / aspect_ratio))
         if x < 0 or x >= self.rel_depth.shape[1] or y < 0 or y >= self.rel_depth.shape[0]:
+            box.hide()
             return
         depth_val = round(self.rel_depth[y][x], 1)
         
-        box = self.main_window.calibrationDepthTooltip
+        box.show()
         dest = box.parentWidget().mapFromGlobal(e.globalPosition())
         box.move(int(dest.x()) + 20, int(dest.y()) + 10)
-        self.main_window.calibrationDepthTooltipLabel.setText(f"{depth_val} m ")
+        self.depth_tooltip_label.setText(f"{depth_val} m ")
         box.parentWidget().update() # needed to prevent visual artifacts
+    
+    def depth_view_leave_event(self, e):
+        self.depth_tooltip_box.hide()
 
     def set_root_path(self, root_path):
         self.root_path = root_path
