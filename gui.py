@@ -26,11 +26,7 @@ from depth_estimation_worker import DepthEstimationWorker
 
 # if implement localized method, make sure it supports any image size (padding shouldn't be fixed)
 
-# automatic labeled output as an option (see label_results.py)
-
 # bundle the zoedepth weights with the build, instead of downloading from the internet, to remove dependence on the internet download
-
-# make deployments its own folder, so we don't have to check for our created folders
 
 # if someone picks a calibration image and then picks a different one, both depth callbacks will occur, but I'm not sure the order is guaranteed
 # - would be nice of having a way to cancel a job. Perhaps using processes works better
@@ -43,13 +39,8 @@ from depth_estimation_worker import DepthEstimationWorker
 
 # sort calibration deployments by deployment name, when adding to calibrated box
 
-# implement itemChange event for points, to avoid dragging out of bounds
-# https://stackoverflow.com/questions/3548254/restrict-movable-area-of-qgraphicsitem
-
 # graphics view sizing (ideally allow the images to get bigger if they're able)
 # this involves changing the x,y coords in calibrations.json to fractional units of total width/height
-
-# read depth values from depth view on hover
 
 # Calibration "save and next" button or something like that? For faster workflow
 

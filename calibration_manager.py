@@ -41,7 +41,7 @@ class CalibrationManager:
         self.json_path = None
         
         # make scenes and init views
-        self.scene = QGraphicsScene(0,0,400,200)
+        self.scene = QGraphicsScene()
         font = QFont("Times", 12)
         self.choose_image_scene = QGraphicsScene()
         self.choose_image_scene.addText("Please choose a reference image", font)
@@ -172,16 +172,17 @@ class CalibrationManager:
     def init_calibration_image(self, fpath):
         abs_fpath = os.path.join(self.root_path, fpath)
 
-        # update scenes
-        self.ref_view.setScene(self.scene)
-        self.depth_view.setScene(self.loading_depth_scene)
-
         # display pixmap background
         self.ref_pixmap = QPixmap(abs_fpath).scaledToWidth(400, mode=Qt.TransformationMode.SmoothTransformation)
         self.set_background(self.ref_view, self.ref_pixmap)
         # sizing
         self.ref_view.setMinimumSize(self.ref_pixmap.width(), self.ref_pixmap.height())
         self.depth_view.setMinimumSize(self.ref_pixmap.width(), self.ref_pixmap.height())
+
+        # update scenes
+        self.scene.setSceneRect(self.ref_pixmap.rect().toRectF())   # limits point drag range
+        self.ref_view.setScene(self.scene)
+        self.depth_view.setScene(self.loading_depth_scene)
     
     def process_zoe_result(self, depth, abs_fpath):
         # save
@@ -202,10 +203,10 @@ class CalibrationManager:
         graphics_view.scene().update()
 
     def scene_mouse_press(self, e):
-        pos = e.scenePos()
         QGraphicsScene.mousePressEvent(self.scene, e)
         if e.isAccepted():
             return
+        pos = e.scenePos()
         self.add_calibration_entry(pos.x(), pos.y())
 
     def add_calibration_entry(self, x, y, distance=None):
@@ -245,7 +246,9 @@ class CalibrationManager:
             truth = float(text)
             pos = entry.point.pos()
             x = math.floor(self.rel_depth.shape[1] * pos.x() / self.ref_pixmap.width())
+            x = min(x, self.rel_depth.shape[1]-1) # easiest way of dealing w the very edge
             y = math.floor(self.rel_depth.shape[0] * pos.y() / self.ref_pixmap.height())
+            y = min(y, self.rel_depth.shape[0]-1)
             estim = self.rel_depth[y][x]
 
             A.append([estim, 1])
@@ -362,7 +365,16 @@ class CalibrationManager:
     
 
 
-
+class Point(QGraphicsEllipseItem):
+    def itemChange(self, change, value):
+        if self.scene() and change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
+            rect = self.scene().sceneRect()
+            if not rect.contains(value):
+                print("out of bounds")
+                value.setX(min(rect.right(), max(value.x(), rect.left())))
+                value.setY(min(rect.bottom(), max(value.y(), rect.top())))
+                return value
+        return QGraphicsItem.itemChange(self, change, value)
 
 
 class CalibrationEntry:
@@ -374,9 +386,9 @@ class CalibrationEntry:
         self.calibration_entries = calibration_entries
 
         # point
-        self.point = QGraphicsEllipseItem(-5, -5, 10, 10)   # scene coords, -5 offset so center is at item coords 0,0
+        self.point = Point(-5, -5, 10, 10)   # scene coords, -5 offset so center is at item coords 0,0
         self.point.setPos(x, y)
-        self.point.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
+        self.point.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
         self.point.mousePressEvent = lambda e: self.focus()
         scene.addItem(self.point)
 
