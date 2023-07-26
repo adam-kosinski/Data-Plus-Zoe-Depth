@@ -21,14 +21,23 @@ import run_detector_batch
 
 SEGMENTATION_RESIZE_FACTOR = 4
 
+# measured times in seconds used for progress bar, treat as relative though in case computer faster etc
+MEGADETECTOR_TIME_PER_IMAGE = 4.5
+SEGMENTATION_TIME_PER_IMAGE = 2
+ZOEDEPTH_BUILD_TIME = 12
+ZOEDEPTH_INFER_TIME_PER_IMAGE = 20
+LABEL_TIME_PER_IMAGE = 0.5
 
 
 class DepthEstimationSignals(QObject):
-    megadetector_done = pyqtSignal(object)  # doesn't carry data, but not providing an argument broke stuff
+    message = pyqtSignal(str)
+    progress = pyqtSignal(float)  # 0-100 for progress percentage
+    megadetector_done = pyqtSignal()
     start_deployment = pyqtSignal(str)  # string with deployment name
 
-    zoedepth_progress = pyqtSignal(int, int)   # current index (starting at 1), total files to process
-    done = pyqtSignal(object)   # doesn't carry data
+    # zoedepth_progress = pyqtSignal(int, int)   # current index (starting at 1), total files to process
+    stopped = pyqtSignal()  # separate signal than done for clarity, and perhaps useful in the future
+    done = pyqtSignal()
 
 
 
@@ -41,22 +50,41 @@ class DepthEstimationWorker(QRunnable):
         self.calibration_json = main_window.calibration_manager.get_json()
 
         self.signals = DepthEstimationSignals()
+        self.stop_requested = False
 
+        self.inference_file_dict = {}
+        self.total_relative_time_estimated = 0  # initialized by summing config values - see run() function
+        self.progress = 0   # 0-100
+
+
+    def stop_slot(self):
+        print("stop")
+        self.stop_requested = True
+        self.signals.message.emit("Finding a good stopping place :)")
 
     def run(self):
         # get inference files for each deployment
-
-        inference_file_dict = {}
+        self.inference_file_dict = {}
         for deployment in self.calibration_json:
-            inference_file_dict[deployment] = self.choose_inference_files(deployment)
+            self.inference_file_dict[deployment] = self.choose_inference_files(deployment)
+
+        # prep progress bar estimation
+        n_images = 0
+        n_inference_images = 0
+        for deployment in os.listdir(self.deployments_dir):
+            n_images += self.n_files_in_deployment(deployment)
+            n_inference_images += self.n_files_in_deployment(deployment, inference_only=True)
+        self.total_relative_time_estimated = ZOEDEPTH_BUILD_TIME + n_images * (MEGADETECTOR_TIME_PER_IMAGE + SEGMENTATION_TIME_PER_IMAGE) + n_inference_images * (ZOEDEPTH_INFER_TIME_PER_IMAGE + LABEL_TIME_PER_IMAGE)
+        self.progress = 0   # 0-100
 
 
         # run megadetector (do all of this before zoedepth to avoid weird conflicts when building the zoe model)
-        
+
         detections_dir = os.path.join(self.root_path, "detections")
         os.makedirs(detections_dir, exist_ok=True)
         
         for deployment in self.calibration_json:
+            self.signals.message.emit(f"Locating animal bounding boxes - {deployment}")
             print(deployment)
             
             output_file = os.path.join(detections_dir, deployment + ".json")
@@ -64,19 +92,30 @@ class DepthEstimationWorker(QRunnable):
                 input_dir = os.path.join(self.deployments_dir, deployment)
                 args = ["megadetector_weights/md_v5a.0.0.pt", input_dir, output_file, "--threshold", "0.5"]
                 run_detector_batch.main(args)
+
+                if self.stop_requested:
+                    self.signals.message.emit("Stopped")
+                    self.signals.stopped.emit()
+                    return
+            
+            self.increment_progress(self.n_files_in_deployment(deployment) * MEGADETECTOR_TIME_PER_IMAGE)
             print("Megadetector done with deployment", deployment)
         
         print("Megadetector done")
-        self.signals.megadetector_done.emit(None)
+        self.signals.megadetector_done.emit()
+        
 
 
 
         # run zoedepth, segmentation, and get animal distances
-
         # by default, don't load zoedepth, only load it if we need it
 
-        for deployment in self.calibration_json:
-            inference_files = inference_file_dict[deployment]
+        # if zoedepth was already built, reflect that in the progress bar
+        if self.main_window.zoedepth_model:
+            self.increment_progress(ZOEDEPTH_BUILD_TIME)
+
+        for deployment in self.calibration_json:            
+            inference_files = self.inference_file_dict[deployment]
 
             input_dir = os.path.join(self.deployments_dir, deployment)
             segmentation_dir = os.path.join(self.root_path, "segmentation", deployment)
@@ -95,11 +134,26 @@ class DepthEstimationWorker(QRunnable):
 
             
             # segmentation
+            self.signals.message.emit(f"{deployment} - running segmentation")
             segmentation_filepath_dict = run_segmentation.main(input_dir, output_dir=segmentation_dir, resize_factor=SEGMENTATION_RESIZE_FACTOR, inference_files=inference_files)
+            self.increment_progress(self.n_files_in_deployment(deployment) * SEGMENTATION_TIME_PER_IMAGE)
+            if self.stop_requested:
+                self.signals.message.emit("Stopped")
+                self.signals.stopped.emit()
+                return
 
 
-            for image_abs_path in inference_files:
-                
+
+            # run zoedepth
+
+            for i, image_abs_path in enumerate(inference_files):
+                self.increment_progress(ZOEDEPTH_INFER_TIME_PER_IMAGE)  # do this at the beginning (instead of end) for accurate accounting, since there are so many spots with the continue keyword that skip the end
+
+                if self.stop_requested:
+                    self.signals.message.emit("Stopped")
+                    self.signals.stopped.emit()
+                    return
+                                
                 # check if an image
                 ext = os.path.splitext(image_abs_path)[1].lower()
                 if not (ext == ".jpg" or ext == ".jpeg" or ext == ".png"):
@@ -113,7 +167,6 @@ class DepthEstimationWorker(QRunnable):
                 if len(detections) == 0:
                     continue
                 
-                # run zoedepth
                 print("Getting depth for", image_abs_path)
                 # check if depth was already calculated, if so use it and skip zoedepth calculation
                 depth_basename = os.path.splitext(os.path.basename(image_abs_path))[0] + "_raw.png"
@@ -126,7 +179,15 @@ class DepthEstimationWorker(QRunnable):
                     # load zoedepth if this is the first time we're using it
                     if not self.main_window.zoedepth_model:
                         print("Loading ZoeDepth")
+                        self.signals.message.emit("Building depth model")
                         self.main_window.zoedepth_model = build_zoedepth_model()
+                        self.increment_progress(ZOEDEPTH_BUILD_TIME)
+                        if self.stop_requested:
+                            self.signals.message.emit("Stopped")
+                            self.signals.stopped.emit()
+                            return
+
+                    self.signals.message.emit(f"{deployment} - calculating depth for image {i+1}/{len(inference_files)}")
 
                     print("Running zoedepth on", image_abs_path)
                     with Image.open(image_abs_path).convert("RGB") as image:
@@ -134,6 +195,8 @@ class DepthEstimationWorker(QRunnable):
                     save_basename = os.path.splitext(os.path.basename(image_abs_path))[0] + "_raw.png"
                     save_path = os.path.join(depth_maps_dir, save_basename)
                     save_raw_16bit(depth, save_path)
+                
+                self.signals.message.emit(f"{deployment} - calculating depth for image {i+1}/{len(inference_files)}")
                 
                 # calibrate
                 # lazy calibration
@@ -216,14 +279,37 @@ class DepthEstimationWorker(QRunnable):
                     writer.writeheader()
                     for row in self.main_window.csv_output_rows:
                         writer.writerow(row)
+                
         
+
+        # keep scrollbar updated correctly if we never needed to build the depth model
+        if not self.main_window.zoedepth_model:
+            self.increment_progress(ZOEDEPTH_BUILD_TIME)
+
+        # label images
+        self.signals.message.emit("Creating labeled output images")
         output_fpath = os.path.join(self.root_path, "output.csv")
         if os.path.exists(output_fpath):
             label_results(self.root_path, output_fpath)
         
+        self.increment_progress(self.total_relative_time_estimated)    # finish to 100%, accounting will be off if use LABEL_TIME_PER_IMAGE b/c we originally didn't know how many output rows (= labeled images) there would be
+        
         print("DONE!!!!!!!!!!!!!!!!!!!!")
-        self.signals.done.emit(None)
+        self.signals.message.emit("Done!")
+        self.signals.done.emit()
 
+
+    def n_files_in_deployment(self, deployment, inference_only=False):
+        if inference_only:
+            if deployment not in self.inference_file_dict:
+                return 0
+            return len(self.inference_file_dict[deployment])
+        return len(os.listdir(os.path.join(self.deployments_dir, deployment)))
+
+    def increment_progress(self, relative_time_increment):
+        self.progress += 100 * relative_time_increment / self.total_relative_time_estimated
+        self.progress = min(100, self.progress)
+        self.signals.progress.emit(self.progress)
 
     def choose_inference_files(self, deployment):
         # not all image files in a deployment are necessarily being used for inference
@@ -246,3 +332,5 @@ class DepthEstimationWorker(QRunnable):
         intercept = self.calibration_json[deployment]["intercept"]
         calib_depth = calib_depth * slope + intercept
         return calib_depth
+
+

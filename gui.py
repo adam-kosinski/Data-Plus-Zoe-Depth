@@ -2,8 +2,9 @@ import numpy as np
 import os
 import functools
 from PIL import Image
+from time import sleep
 
-from PyQt6.QtCore import QSize, Qt, QRunnable, QThreadPool, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, QRunnable, QThreadPool, pyqtSignal, QThread, QObject
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -22,6 +23,8 @@ from depth_estimation_worker import DepthEstimationWorker
 
 # TODO
 
+# if we update megadetector to only use inference images, update the total relative time calculation for the progress bar to reflect this
+
 # automatic cropping
 
 # if implement localized method, make sure it supports any image size (padding shouldn't be fixed)
@@ -36,8 +39,6 @@ from depth_estimation_worker import DepthEstimationWorker
 # or - should be able to save a calibration without depth computed yet, and have the depth + linear regression finishing computing in a thread somewhere
 
 # note that there is a GUI lag spike when the model is loaded
-
-# sort calibration deployments by deployment name, when adding to calibrated box
 
 # graphics view sizing (ideally allow the images to get bigger if they're able)
 # this involves changing the x,y coords in calibrations.json to fractional units of total width/height
@@ -61,6 +62,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         ui_path = os.path.join(os.path.dirname(__file__), "gui.ui")
         uic.loadUi(ui_path, self)
+        self.stopButton.hide()
+        self.set_progress_message("")
 
         self.root_path = None
         self.deployments_dir = None
@@ -71,7 +74,6 @@ class MainWindow(QMainWindow):
         self.zoedepth_model = None
 
         self.deployment_hboxes = {} # keep references to these so we can move them between the uncalibrated and calibrated lists
-        self.is_deployment_calibrated = {}  # deployment: bool (whether calibrated)
 
         self.csv_output_rows = []
 
@@ -79,13 +81,11 @@ class MainWindow(QMainWindow):
         self.openRootFolder.clicked.connect(self.open_root_folder)
         self.runButton.clicked.connect(self.run_depth_estimation)
 
-
         # temp
-        self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/test")
+        # self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/test")
         self.resize(QSize(800, 600))
-    
-    
-        
+
+
 
     def open_root_folder(self, root_path=None):
         if root_path:
@@ -101,7 +101,6 @@ class MainWindow(QMainWindow):
         self.deployments_dir = os.path.join(self.root_path, "deployments")
         self.rootFolderLabel.setText(self.root_path)
         self.calibration_manager.update_root_path()
-        print(self.root_path)
         
         # display deployments
 
@@ -124,29 +123,54 @@ class MainWindow(QMainWindow):
             hbox.addStretch()
             if deployment in calibration_json:
                 self.calibratedDeployments.addLayout(hbox)
-                self.is_deployment_calibrated[deployment] = True
                 button.setText("Edit Calibration")
             else:
                 self.uncalibratedDeployments.addLayout(hbox)
-                self.is_deployment_calibrated[deployment] = False
                 button.setText("Calibrate")
+        
+        self.runButton.setEnabled(True)
+        self.set_progress_message('Click "Run Distance Estimation" to start, only the calibrated deployments will be processed')
+        self.progressBar.reset()
+    
     
     def run_depth_estimation(self):
-        # self.runButton.setEnabled(False)
         print("RUNNING DEPTH ESTIMATION ===============================")
+
+        self.setAllButtonsEnabled(False)
+        self.stopButton.show()
 
         # reset rows so we don't get duplicates
         self.csv_output_rows = []
         
         worker = DepthEstimationWorker(self)
+        self.stopButton.clicked.connect(worker.stop_slot)
+        worker.signals.message.connect(self.set_progress_message)
+        worker.signals.progress.connect(self.set_progress_bar_value)
+        worker.signals.stopped.connect(self.depth_estimation_thread_finished)
+        worker.signals.done.connect(self.depth_estimation_thread_finished)
+        
+        self.progressBar.reset()
         self.threadpool.start(worker)
 
+    
 
+    def setAllButtonsEnabled(self, enable):
+        self.runButton.setEnabled(enable)
+        self.openRootFolder.setEnabled(enable)
+        for hbox in self.deployment_hboxes.values():
+            button = hbox.itemAt(0).widget()
+            button.setEnabled(enable)
 
-            
-            
-            
-            
+    def set_progress_message(self, message):
+        self.progressMessage.setText(message)
+    
+    def set_progress_bar_value(self, value):
+        self.progressBar.setValue(round(value))
+
+    def depth_estimation_thread_finished(self):
+        self.setAllButtonsEnabled(True)
+        self.stopButton.hide()
+
 
 
 

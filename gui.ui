@@ -76,7 +76,7 @@
              <x>0</x>
              <y>0</y>
              <width>681</width>
-             <height>176</height>
+             <height>155</height>
             </rect>
            </property>
            <layout class="QVBoxLayout" name="verticalLayout_2">
@@ -107,13 +107,6 @@
           </property>
          </widget>
         </item>
-        <item alignment="Qt::AlignLeft">
-         <widget class="QPushButton" name="runButton">
-          <property name="text">
-           <string>Run Distance Estimation</string>
-          </property>
-         </widget>
-        </item>
         <item>
          <widget class="QScrollArea" name="scrollArea_2">
           <property name="widgetResizable">
@@ -125,7 +118,7 @@
              <x>0</x>
              <y>0</y>
              <width>681</width>
-             <height>175</height>
+             <height>155</height>
             </rect>
            </property>
            <layout class="QVBoxLayout" name="verticalLayout_3">
@@ -147,6 +140,54 @@
             </item>
            </layout>
           </widget>
+         </widget>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_4">
+          <item>
+           <widget class="QPushButton" name="runButton">
+            <property name="enabled">
+             <bool>false</bool>
+            </property>
+            <property name="text">
+             <string>Run Distance Estimation</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="stopButton">
+            <property name="text">
+             <string>Stop</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="horizontalSpacer_2">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="QLabel" name="progressMessage">
+          <property name="text">
+           <string>progressMessage</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QProgressBar" name="progressBar">
+          <property name="value">
+           <number>0</number>
+          </property>
          </widget>
         </item>
        </layout>

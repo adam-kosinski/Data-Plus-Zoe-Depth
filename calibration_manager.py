@@ -349,18 +349,17 @@ class CalibrationManager:
         json_data[self.deployment] = self.deployment_json
         with open(self.json_path, "w") as json_file:
             json.dump(json_data, json_file, indent=4)
+
+        self.saved = True
+        self.main_window.saveCalibrationButton.setEnabled(False)
         
         # mark hbox as calibrated on main screen
         hbox = self.main_window.deployment_hboxes[self.deployment]
         hbox.setParent(None)
         self.main_window.calibratedDeployments.addLayout(hbox)
 
-        # These two lines break stuff, no idea why
-        # button = hbox.takeAt(0).widget()
-        # button.setText("Edit Calibration")
-        
-        self.saved = True
-        self.main_window.saveCalibrationButton.setEnabled(False)
+        # refresh main screen
+        self.main_window.open_root_folder(self.root_path)
     
 
     def exit_calibration(self):
