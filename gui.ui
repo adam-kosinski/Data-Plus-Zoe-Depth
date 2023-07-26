@@ -179,7 +179,7 @@
         <item>
          <widget class="QLabel" name="progressMessage">
           <property name="text">
-           <string>progressMessage</string>
+           <string>progressMessage - I get initialized to an empty string when program loads</string>
           </property>
          </widget>
         </item>

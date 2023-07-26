@@ -62,8 +62,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         ui_path = os.path.join(os.path.dirname(__file__), "gui.ui")
         uic.loadUi(ui_path, self)
+        self.setWindowTitle("Wildlife Distance Estimation")
         self.stopButton.hide()
-        self.set_progress_message("")
+        self.set_progress_message("")   # done here so in Qt Designer the label would still be visible
 
         self.root_path = None
         self.deployments_dir = None
