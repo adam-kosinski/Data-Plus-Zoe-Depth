@@ -35,8 +35,8 @@ class CalibrationManager:
         self.main_window = main_window
 
         # path references, see self.update_root_path()
-        self.root_path = None
-        self.deployments_dir = None
+        self.root_path = None       # shortcut for main window's root path
+        self.deployments_dir = None # shortcut too
         self.calib_dir = None
         self.json_path = None
         

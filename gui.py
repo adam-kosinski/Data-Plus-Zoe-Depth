@@ -85,7 +85,7 @@ class MainWindow(QMainWindow):
         self.runButton.clicked.connect(self.run_depth_estimation)
 
         # temp
-        # self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
+        self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
         self.resize(QSize(800, 600))
 
 
@@ -103,7 +103,9 @@ class MainWindow(QMainWindow):
         self.root_path = os.path.normpath(self.root_path)    # normpath to keep slashses standardized, in case that matters
         self.deployments_dir = os.path.join(self.root_path, "deployments")
         self.rootFolderLabel.setText(self.root_path)
+
         self.calibration_manager.update_root_path()
+        self.crop_manager.update_root_path()
 
         self.openCropScreenButton.setEnabled(True)
         

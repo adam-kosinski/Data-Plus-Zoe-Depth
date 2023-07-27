@@ -1,8 +1,5 @@
-import numpy as np
 import os
-from PIL import Image
-import csv
-import math
+import json
 
 from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtWidgets import (
@@ -29,18 +26,24 @@ CROP_HANDLE_WIDTH = 4
 MIN_CROP_RECT_WIDTH = CROP_HANDLE_SIZE * 3 + 10
 MIN_CROP_RECT_HEIGHT = CROP_HANDLE_SIZE * 3 + 10
 
+# if you ever add support for multiple deployments, make sure to update CropManger.open_image() and CropManager.save()
+# and also the end if CropManager.__init__(), which checks for existing config
+
+
 
 class CropManager:
     def __init__(self, main_window):
         self.main_window = main_window
+        self.root_path = None   # shortcut for main window's root path
         
-        self.scene = QGraphicsScene()
+        self.scene = None   # initializes in self.open_image()
         self.view = main_window.cropGraphicsView
-        self.view.setScene(self.scene)
 
         self.crop_rect = None   # initialized when image is opened
 
-        self.crop_image_abspath = None
+        self.config_filepath = None
+        self.crop_image_relpath = None
+        self.saved = True
 
         # units of the original image's pixels
         self.image_width = 0
@@ -49,37 +52,98 @@ class CropManager:
         self.crop_bottom = 0
         self.crop_left = 0
         self.crop_right = 0
+        self.resize_factor = None
 
         # event handlers
-        main_window.openCropScreenButton.clicked.connect(lambda: main_window.screens.setCurrentWidget(main_window.cropScreen))
+        main_window.openCropScreenButton.clicked.connect(self.open_crop_screen)
         main_window.openCropImageButton.clicked.connect(self.open_image)
-        main_window.cancelCropButton.clicked.connect(lambda: main_window.screens.setCurrentWidget(main_window.mainScreen))
+        main_window.cancelCropButton.clicked.connect(self.back_to_main_screen)
+        main_window.saveCropButton.clicked.connect(self.save)
+        main_window.cropTopSpinBox.valueChanged.connect(lambda new_value: self.spin_box_changed(main_window.cropTopSpinBox))
+        main_window.cropBottomSpinBox.valueChanged.connect(lambda new_value: self.spin_box_changed(main_window.cropBottomSpinBox))
+        main_window.cropLeftSpinBox.valueChanged.connect(lambda new_value: self.spin_box_changed(main_window.cropLeftSpinBox))
+        main_window.cropRightSpinBox.valueChanged.connect(lambda new_value: self.spin_box_changed(main_window.cropRightSpinBox))
 
-    def open_image(self):
-        open_directory = self.main_window.deployments_dir
-        dialog = QFileDialog(parent=self.main_window, caption="Choose Image", directory=open_directory)
-        dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
-        dialog.setNameFilter("*.jpg *.jpeg *.png")
-        if not dialog.exec():
-            return
+        
 
-        abspath = dialog.selectedFiles()[0]
-        self.crop_image_abspath = abspath
-        pixmap = QPixmap(abspath)
+
+    def update_root_path(self):
+        self.root_path = self.main_window.root_path
+        self.config_filepath = os.path.join(self.main_window.root_path, "crop_config.json")
+
+
+    def open_crop_screen(self):
+        self.main_window.screens.setCurrentWidget(self.main_window.cropScreen)
+
+        # open previous config if it exists
+        if os.path.exists(self.config_filepath):
+            with open(self.config_filepath) as json_file:
+                json_data = json.load(json_file)
+                first_deployment = list(json_data.keys())[0]
+
+            self.open_image(json_data[first_deployment])
+
+
+    def back_to_main_screen(self):
+        if not self.saved:
+            button = QMessageBox.question(self.main_window, "Changes Not Saved", "Are you sure you want to exit? The changes you made aren't saved.")
+            if button != QMessageBox.StandardButton.Yes:
+                return
+        self.saved = True
+        self.main_window.saveCropButton.setEnabled(False)
+        self.main_window.screens.setCurrentWidget(self.main_window.mainScreen)
+
+
+    def open_image(self, config_json=None):
+        
+        if not config_json:
+            open_directory = self.main_window.deployments_dir
+            dialog = QFileDialog(parent=self.main_window, caption="Choose Image", directory=open_directory)
+            dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+            dialog.setNameFilter("*.jpg *.jpeg *.png")
+            if not dialog.exec():
+                return
+            self.crop_image_relpath = os.path.relpath(dialog.selectedFiles()[0], self.main_window.root_path)
+            self.crop_top = 0
+            self.crop_bottom = 0
+            self.crop_left = 0
+            self.crop_right = 0
+
+            self.saved = False
+            self.main_window.saveCropButton.setEnabled(True)
+
+        else:
+            self.crop_top = config_json["crop_top"]
+            self.crop_bottom = config_json["crop_bottom"]
+            self.crop_left = config_json["crop_left"]
+            self.crop_right = config_json["crop_right"]
+            self.crop_image_relpath = config_json["crop_image_relpath"]
+
+        crop_image_abspath = os.path.join(self.main_window.root_path, self.crop_image_relpath)
+        pixmap = QPixmap(crop_image_abspath)
         self.image_width = pixmap.width()
         self.image_height = pixmap.height()
+        
         self.main_window.cropImageDimensionsLabel.setText(f"{self.image_width} x {self.image_height}")
         
         self.main_window.cropTopSpinBox.setMaximum(self.image_height)
         self.main_window.cropTopSpinBox.setValue(0)
+        self.main_window.cropTopSpinBox.setEnabled(True)
         self.main_window.cropBottomSpinBox.setMaximum(self.image_height)
         self.main_window.cropBottomSpinBox.setValue(0)
+        self.main_window.cropBottomSpinBox.setEnabled(True)
         self.main_window.cropLeftSpinBox.setMaximum(self.image_width)
         self.main_window.cropLeftSpinBox.setValue(0)
+        self.main_window.cropLeftSpinBox.setEnabled(True)
         self.main_window.cropRightSpinBox.setMaximum(self.image_width)
         self.main_window.cropRightSpinBox.setValue(0)
+        self.main_window.cropRightSpinBox.setEnabled(True)
 
         resized_pixmap = pixmap.scaledToWidth(CROP_PIXMAP_WIDTH, mode=Qt.TransformationMode.SmoothTransformation)
+        self.resize_factor = CROP_PIXMAP_WIDTH / self.image_width
+        
+        self.scene = QGraphicsScene()
+        self.view.setScene(self.scene)
         self.scene.setSceneRect(resized_pixmap.rect().toRectF())   # will be used to limit drag range
         
         background_pixmap_item = QGraphicsPixmapItem(resized_pixmap)
@@ -87,20 +151,84 @@ class CropManager:
         self.scene.addItem(background_pixmap_item)
 
         self.crop_rect = CropRect(self, self.scene, resized_pixmap.rect().toRectF(), resized_pixmap)
-
-    def crop_rect_changed(self):
-        rect = self.crop_rect.rect()
-        resize_factor = CROP_PIXMAP_WIDTH / self.image_width
-
-        self.crop_top = round(rect.top() / resize_factor)
-        self.crop_bottom = self.image_height - min(self.image_height, round(rect.bottom() / resize_factor))
-        self.crop_left = round(rect.left() / resize_factor)
-        self.crop_right = self.image_width - min(self.image_width, round(rect.right() / resize_factor))
+        self.update_crop_rect()
 
         self.main_window.cropTopSpinBox.setValue(self.crop_top)
         self.main_window.cropBottomSpinBox.setValue(self.crop_bottom)
         self.main_window.cropLeftSpinBox.setValue(self.crop_left)
         self.main_window.cropRightSpinBox.setValue(self.crop_right)
+
+
+    def update_crop_rect(self):
+        # crop manager updating the crop rect, without receiving an update in return
+        x = self.crop_left * self.resize_factor
+        y = self.crop_top * self.resize_factor
+        width = (self.image_width - self.crop_left - self.crop_right) * self.resize_factor
+        height = (self.image_height - self.crop_top - self.crop_bottom) * self.resize_factor
+        new_rect = QRectF(x, y, width, height)
+        self.crop_rect.update_rect(new_rect, update_manager=False)
+
+    def crop_rect_changed(self):
+        # crop rect telling the manager it changed
+        self.saved = False
+        self.main_window.saveCropButton.setEnabled(True)
+
+        rect = self.crop_rect.rect()
+
+        self.crop_top = round(rect.top() / self.resize_factor)
+        self.crop_bottom = self.image_height - min(self.image_height, round(rect.bottom() / self.resize_factor))
+        self.crop_left = round(rect.left() / self.resize_factor)
+        self.crop_right = self.image_width - min(self.image_width, round(rect.right() / self.resize_factor))
+
+        self.main_window.cropTopSpinBox.setValue(self.crop_top)
+        self.main_window.cropBottomSpinBox.setValue(self.crop_bottom)
+        self.main_window.cropLeftSpinBox.setValue(self.crop_left)
+        self.main_window.cropRightSpinBox.setValue(self.crop_right)
+    
+    def spin_box_changed(self, spin_box):
+        if not spin_box.hasFocus():
+            return
+        
+        self.saved = False
+        self.main_window.saveCropButton.setEnabled(True)
+
+        # enforce allowed crop values
+        self.main_window.cropTopSpinBox.setMaximum(self.image_height - self.crop_bottom - MIN_CROP_RECT_HEIGHT/self.resize_factor)
+        self.main_window.cropBottomSpinBox.setMaximum(self.image_height - self.crop_top - MIN_CROP_RECT_HEIGHT/self.resize_factor)
+        self.main_window.cropLeftSpinBox.setMaximum(self.image_width - self.crop_right - MIN_CROP_RECT_WIDTH/self.resize_factor)
+        self.main_window.cropRightSpinBox.setMaximum(self.image_width - self.crop_left - MIN_CROP_RECT_WIDTH/self.resize_factor)
+
+        # update instance variable values
+        self.crop_top = self.main_window.cropTopSpinBox.value()
+        self.crop_bottom = self.main_window.cropBottomSpinBox.value()
+        self.crop_left = self.main_window.cropLeftSpinBox.value()
+        self.crop_right = self.main_window.cropRightSpinBox.value()
+
+        self.update_crop_rect()
+
+
+    def save(self):
+        print(self.crop_top, self.crop_bottom, self.crop_left, self.crop_right)
+        # support separate crop config for each deployment, in case we add UI support for that later (or user goes in and can edit it)
+        json_data = {}
+        for deployment in os.listdir(self.main_window.deployments_dir):
+            json_data[deployment] = {
+                "image_width": self.image_width,
+                "image_height": self.image_height,
+                "crop_top": self.crop_top,
+                "crop_bottom": self.crop_bottom,
+                "crop_left": self.crop_left,
+                "crop_right": self.crop_right,
+                "crop_image_relpath": self.crop_image_relpath
+            }
+        with open(self.config_filepath, 'w') as json_file:
+            json.dump(json_data, json_file, indent=4)
+        
+        self.saved = True
+        self.main_window.saveCropButton.clearFocus()    # so focus doesn't jump weirdly
+        self.main_window.saveCropButton.setEnabled(False)
+
+
 
 
 
@@ -138,15 +266,18 @@ class CropRect(QGraphicsRectItem):
         path.addRect(self.rect())
         return path
     
-    def update_rect(self, new_rectF):
+    def update_rect(self, new_rectF, update_manager=True):
         self.setRect(new_rectF)
         for handle in self.handles:
             handle.ignore_position_changes = True
             handle.update_to_match_crop_rect()
             handle.ignore_position_changes = False
         
-        self.crop_manager.crop_rect_changed()
+        if update_manager:  # will be false if the crop manager is initating this
+            self.crop_manager.crop_rect_changed()
         
+
+
 
 
 
@@ -241,6 +372,11 @@ class CropHandle(QGraphicsPathItem):
     
     def update_to_match_crop_rect(self):
         
+        # nudge the graphics engine to reevaluate the bounding rect
+        # because it doesn't even bother calling shape() if it thinks it knows what the bounding rect is and the mouse is outside
+        self.boundingRect().height()
+        self.boundingRect().width()
+
         rect = self.crop_rect.rect()
 
         # x
