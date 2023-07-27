@@ -2,6 +2,7 @@ import numpy as np
 import os
 from PIL import Image
 import csv
+import math
 
 from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtWidgets import (
@@ -37,6 +38,10 @@ class CropManager:
         self.view = main_window.cropGraphicsView
         self.view.setScene(self.scene)
 
+        self.crop_rect = None   # initialized when image is opened
+
+        self.crop_image_abspath = None
+
         # units of the original image's pixels
         self.image_width = 0
         self.image_height = 0
@@ -58,12 +63,22 @@ class CropManager:
         if not dialog.exec():
             return
 
-        abs_path = dialog.selectedFiles()[0]
-        pixmap = QPixmap(abs_path)
+        abspath = dialog.selectedFiles()[0]
+        self.crop_image_abspath = abspath
+        pixmap = QPixmap(abspath)
         self.image_width = pixmap.width()
         self.image_height = pixmap.height()
-        print(self.image_width, self.image_height)
+        self.main_window.cropImageDimensionsLabel.setText(f"{self.image_width} x {self.image_height}")
         
+        self.main_window.cropTopSpinBox.setMaximum(self.image_height)
+        self.main_window.cropTopSpinBox.setValue(0)
+        self.main_window.cropBottomSpinBox.setMaximum(self.image_height)
+        self.main_window.cropBottomSpinBox.setValue(0)
+        self.main_window.cropLeftSpinBox.setMaximum(self.image_width)
+        self.main_window.cropLeftSpinBox.setValue(0)
+        self.main_window.cropRightSpinBox.setMaximum(self.image_width)
+        self.main_window.cropRightSpinBox.setValue(0)
+
         resized_pixmap = pixmap.scaledToWidth(CROP_PIXMAP_WIDTH, mode=Qt.TransformationMode.SmoothTransformation)
         self.scene.setSceneRect(resized_pixmap.rect().toRectF())   # will be used to limit drag range
         
@@ -71,17 +86,29 @@ class CropManager:
         background_pixmap_item.setOpacity(0.5)
         self.scene.addItem(background_pixmap_item)
 
-        crop_rect = CropRect(self.scene, resized_pixmap.rect().toRectF(), resized_pixmap)
+        self.crop_rect = CropRect(self, self.scene, resized_pixmap.rect().toRectF(), resized_pixmap)
 
-        # crop_rect.prepareGeometryChange() # maybe not necessary
-        # crop_rect.setRect(50, 100, 300, 100)
-        # print(crop_rect.rect().x(), crop_rect.rect().y())
+    def crop_rect_changed(self):
+        rect = self.crop_rect.rect()
+        resize_factor = CROP_PIXMAP_WIDTH / self.image_width
+
+        self.crop_top = round(rect.top() / resize_factor)
+        self.crop_bottom = self.image_height - min(self.image_height, round(rect.bottom() / resize_factor))
+        self.crop_left = round(rect.left() / resize_factor)
+        self.crop_right = self.image_width - min(self.image_width, round(rect.right() / resize_factor))
+
+        self.main_window.cropTopSpinBox.setValue(self.crop_top)
+        self.main_window.cropBottomSpinBox.setValue(self.crop_bottom)
+        self.main_window.cropLeftSpinBox.setValue(self.crop_left)
+        self.main_window.cropRightSpinBox.setValue(self.crop_right)
 
 
 
 class CropRect(QGraphicsRectItem):
-    def __init__(self, scene, rectF, pixmap):
+    def __init__(self, crop_manager, scene, rectF, pixmap):
         super().__init__(rectF)
+
+        self.crop_manager = crop_manager
 
         pen = QPen(Qt.GlobalColor.white)
         pen.setWidth(2)
@@ -111,11 +138,15 @@ class CropRect(QGraphicsRectItem):
         path.addRect(self.rect())
         return path
     
-    def update_handles(self, exclude=None):
+    def update_rect(self, new_rectF):
+        self.setRect(new_rectF)
         for handle in self.handles:
             handle.ignore_position_changes = True
             handle.update_to_match_crop_rect()
             handle.ignore_position_changes = False
+        
+        self.crop_manager.crop_rect_changed()
+        
 
 
 
@@ -278,8 +309,7 @@ class CropHandle(QGraphicsPathItem):
             elif self.for_right:
                 rect.setRight(value.x())
             
-            self.crop_rect.setRect(rect)
-            self.crop_rect.update_handles(exclude=self)
+            self.crop_rect.update_rect(rect)
 
             return value
 

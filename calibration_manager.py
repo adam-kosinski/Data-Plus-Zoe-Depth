@@ -376,7 +376,6 @@ class Point(QGraphicsEllipseItem):
         if self.scene() and change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
             rect = self.scene().sceneRect()
             if not rect.contains(value):
-                print("out of bounds")
                 value.setX(min(rect.right(), max(value.x(), rect.left())))
                 value.setY(min(rect.bottom(), max(value.y(), rect.top())))
                 return value

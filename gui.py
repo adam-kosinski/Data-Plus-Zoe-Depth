@@ -85,7 +85,7 @@ class MainWindow(QMainWindow):
         self.runButton.clicked.connect(self.run_depth_estimation)
 
         # temp
-        self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
+        # self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
         self.resize(QSize(800, 600))
 
 
@@ -162,6 +162,7 @@ class MainWindow(QMainWindow):
     def setAllButtonsEnabled(self, enable):
         self.runButton.setEnabled(enable)
         self.openRootFolder.setEnabled(enable)
+        self.openCropScreenButton.setEnabled(enable)
         for hbox in self.deployment_hboxes.values():
             button = hbox.itemAt(0).widget()
             button.setEnabled(enable)
