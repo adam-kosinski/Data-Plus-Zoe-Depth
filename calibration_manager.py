@@ -51,13 +51,6 @@ class CalibrationManager:
         self.ref_view = main_window.referenceGraphicsView
         self.depth_view = main_window.depthGraphicsView
         
-        # set full viewport update (for background) - gets rid of weird artifacts when items move around, due to update region calculations missing like half a pixel
-        self.ref_view.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
-        self.depth_view.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
-        # antialiasing
-        self.ref_view.setRenderHint(QPainter.RenderHint.Antialiasing)
-        self.depth_view.setRenderHint(QPainter.RenderHint.Antialiasing)
-
         # widget references
         self.vbox = main_window.calibrationList
 
@@ -373,6 +366,11 @@ class CalibrationManager:
     
 
 
+
+
+
+
+
 class Point(QGraphicsEllipseItem):
     def itemChange(self, change, value):
         if self.scene() and change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
@@ -383,6 +381,8 @@ class Point(QGraphicsEllipseItem):
                 value.setY(min(rect.bottom(), max(value.y(), rect.top())))
                 return value
         return QGraphicsItem.itemChange(self, change, value)
+
+
 
 
 class CalibrationEntry:

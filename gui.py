@@ -2,7 +2,6 @@ import numpy as np
 import os
 import functools
 from PIL import Image
-from time import sleep
 
 from PyQt6.QtCore import QSize, Qt, QRunnable, QThreadPool, pyqtSignal, QThread, QObject
 from PyQt6.QtWidgets import (
@@ -17,6 +16,7 @@ from PyQt6 import uic
 
 from gui_utils import clear_layout_contents, depth_to_pixmap
 from calibration_manager import CalibrationManager
+from crop_manager import CropManager
 from depth_estimation_worker import DepthEstimationWorker
 
 
@@ -30,6 +30,8 @@ from depth_estimation_worker import DepthEstimationWorker
 # if implement localized method, make sure it supports any image size (padding shouldn't be fixed)
 
 # bundle the zoedepth weights with the build, instead of downloading from the internet, to remove dependence on the internet download
+
+# estimated time remaining? can get a sense of how fast the person's computer is after we've done either megadetector or zoedepth once, and then use relative times to extrapolate?
 
 # if someone picks a calibration image and then picks a different one, both depth callbacks will occur, but I'm not sure the order is guaranteed
 # - would be nice of having a way to cancel a job. Perhaps using processes works better
@@ -62,7 +64,6 @@ class MainWindow(QMainWindow):
         super().__init__()
         ui_path = os.path.join(os.path.dirname(__file__), "gui.ui")
         uic.loadUi(ui_path, self)
-        self.setWindowTitle("Wildlife Distance Estimation")
         self.stopButton.hide()
         self.set_progress_message("")   # done here so in Qt Designer the label would still be visible
 
@@ -72,6 +73,7 @@ class MainWindow(QMainWindow):
         self.threadpool = QThreadPool()
 
         self.calibration_manager = CalibrationManager(self)
+        self.crop_manager = CropManager(self)
         self.zoedepth_model = None
 
         self.deployment_hboxes = {} # keep references to these so we can move them between the uncalibrated and calibrated lists
@@ -83,7 +85,7 @@ class MainWindow(QMainWindow):
         self.runButton.clicked.connect(self.run_depth_estimation)
 
         # temp
-        # self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/test")
+        self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
         self.resize(QSize(800, 600))
 
 
@@ -102,6 +104,8 @@ class MainWindow(QMainWindow):
         self.deployments_dir = os.path.join(self.root_path, "deployments")
         self.rootFolderLabel.setText(self.root_path)
         self.calibration_manager.update_root_path()
+
+        self.openCropScreenButton.setEnabled(True)
         
         # display deployments
 
