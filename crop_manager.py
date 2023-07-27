@@ -113,9 +113,9 @@ class CropRect(QGraphicsRectItem):
     
     def update_handles(self, exclude=None):
         for handle in self.handles:
-            handle.send_rect_updates = False
+            handle.ignore_position_changes = True
             handle.update_to_match_crop_rect()
-            handle.send_rect_updates = True
+            handle.ignore_position_changes = False
 
 
 
@@ -174,8 +174,7 @@ class CropHandle(QGraphicsPathItem):
 
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)      
         
-        self.mouse_is_down_on_me = False    # used for determining if we should restrict movement or not
-        self.send_rect_updates = True    # used by crop rect when it's updating the crop handle locations
+        self.ignore_position_changes = False    # used by crop rect when it's updating the crop handle locations
 
         # cursor
         if self.horizontal_movement_only:
@@ -190,14 +189,6 @@ class CropHandle(QGraphicsPathItem):
         # set position
         self.update_to_match_crop_rect()
 
-
-    def mousePressEvent(self, e):
-        QGraphicsPathItem.mousePressEvent(self, e)
-        self.mouse_is_down_on_me = True
-    
-    def mouseReleaseEvent(self, e):
-        QGraphicsPathItem.mouseReleaseEvent(self, e)
-        self.mouse_is_down_on_me = False
 
     def shape(self):
         shape_rect = QRectF(-CROP_HANDLE_SIZE, -CROP_HANDLE_SIZE, 2*CROP_HANDLE_SIZE, 2*CROP_HANDLE_SIZE)
@@ -215,6 +206,7 @@ class CropHandle(QGraphicsPathItem):
         path = QPainterPath()
         path.addRect(shape_rect)
         return path
+    
     
     def update_to_match_crop_rect(self):
         
@@ -239,11 +231,11 @@ class CropHandle(QGraphicsPathItem):
         
     
     def itemChange(self, change, value):
-        if self.scene() and change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
+        if self.scene() and change == QGraphicsItem.GraphicsItemChange.ItemPositionChange and not self.ignore_position_changes:
 
-            if self.horizontal_movement_only and self.mouse_is_down_on_me:
+            if self.horizontal_movement_only:
                 value.setY(self.pos().y())
-            if self.vertical_movement_only and self.mouse_is_down_on_me:
+            if self.vertical_movement_only:
                 value.setX(self.pos().x())
             
             # keep within scene
@@ -269,33 +261,26 @@ class CropHandle(QGraphicsPathItem):
 
 
             # update crop rect
-            if self.send_rect_updates:
-                if self.for_top and self.for_left:
-                    rect.setTopLeft(value)
-                elif self.for_top and self.for_right:
-                    rect.setTopRight(value)
-                elif self.for_bottom and self.for_left:
-                    rect.setBottomLeft(value)
-                elif self.for_bottom and self.for_right:
-                    rect.setBottomRight(value)
-                elif self.for_top:
-                    rect.setTop(value.y())
-                elif self.for_bottom:
-                    rect.setBottom(value.y())
-                elif self.for_left:
-                    rect.setLeft(value.x())
-                elif self.for_right:
-                    rect.setRight(value.x())
-                
-                self.crop_rect.setRect(rect)
-                self.crop_rect.update_handles(exclude=self)
+            if self.for_top and self.for_left:
+                rect.setTopLeft(value)
+            elif self.for_top and self.for_right:
+                rect.setTopRight(value)
+            elif self.for_bottom and self.for_left:
+                rect.setBottomLeft(value)
+            elif self.for_bottom and self.for_right:
+                rect.setBottomRight(value)
+            elif self.for_top:
+                rect.setTop(value.y())
+            elif self.for_bottom:
+                rect.setBottom(value.y())
+            elif self.for_left:
+                rect.setLeft(value.x())
+            elif self.for_right:
+                rect.setRight(value.x())
+            
+            self.crop_rect.setRect(rect)
+            self.crop_rect.update_handles(exclude=self)
 
             return value
 
-            # rect = self.scene().sceneRect()
-            # if not rect.contains(value):
-            #     print("out of bounds")
-            #     value.setX(min(rect.right(), max(value.x(), rect.left())))
-            #     value.setY(min(rect.bottom(), max(value.y(), rect.top())))
-            #     return value
         return QGraphicsItem.itemChange(self, change, value)
