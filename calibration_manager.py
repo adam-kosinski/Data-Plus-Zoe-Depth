@@ -98,8 +98,8 @@ class CalibrationManager:
         self.ref_image_path = None
         self.rel_depth_path = None
         self.rel_depth = None
-        self.slope = None
-        self.intercept = None
+        self.slope = 1
+        self.intercept = 0
         self.ref_pixmap = None
 
         self.ref_view.setScene(self.choose_image_scene)
@@ -173,7 +173,6 @@ class CalibrationManager:
         # display pixmap background
         # note: ImageQt crashes / behaves weird for "RGB" PIL images, convert to "RGBA" to avoid weirdness
         with Image.open(abs_fpath).convert("RGBA") as pil_ref_image:
-            print(pil_ref_image.mode)
             cropped_pil_image = self.main_window.crop_manager.crop(pil_ref_image, self.deployment)
 
         self.ref_pixmap = QPixmap.fromImage(ImageQt(cropped_pil_image))
@@ -309,7 +308,8 @@ class CalibrationManager:
         if x < 0 or x >= self.rel_depth.shape[1] or y < 0 or y >= self.rel_depth.shape[0]:
             box.hide()
             return
-        depth_val = round(self.rel_depth[y][x], 1)
+        depth_val = self.rel_depth[y][x] * self.slope + self.intercept
+        depth_val = round(10 * depth_val) / 10
         
         box.show()
         dest = box.parentWidget().mapFromGlobal(e.globalPosition())

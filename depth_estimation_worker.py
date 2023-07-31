@@ -212,7 +212,8 @@ class DepthEstimationWorker(QRunnable):
 
                     print("Running zoedepth on", image_abs_path)
                     with Image.open(image_abs_path).convert("RGB") as image:
-                        depth = self.main_window.zoedepth_model.infer_pil(image)
+                        cropped_image = self.main_window.crop_manager.crop(image, deployment)
+                        depth = self.main_window.zoedepth_model.infer_pil(cropped_image)
                     save_basename = os.path.splitext(os.path.basename(image_abs_path))[0] + "_raw.png"
                     save_path = os.path.join(depth_maps_dir, save_basename)
                     save_raw_16bit(depth, save_path)
@@ -391,8 +392,9 @@ class DepthEstimationWorker(QRunnable):
 
                 rgb_file_to_open = rgb_output_file if rgb_output_file in seen_rgb_already else os.path.join(self.deployments_dir, row['deployment'], row['filename'])
                 with Image.open(rgb_file_to_open) as image:
-                    self.draw_annotations(image, row)
-                    image.save(rgb_output_file)
+                    cropped_image = self.main_window.crop_manager.crop(image, row['deployment'])
+                    self.draw_annotations(cropped_image, row)
+                    cropped_image.save(rgb_output_file)
                     seen_rgb_already.append(rgb_output_file)
 
 
