@@ -74,6 +74,8 @@ class DepthEstimationWorker(QRunnable):
         n_images = 0
         n_inference_images = 0
         for deployment in os.listdir(self.deployments_dir):
+            if not os.path.isdir(os.path.join(self.main_window.deployments_dir, deployment)):
+                continue
             n_images += self.n_files_in_deployment(deployment)
             n_inference_images += self.n_files_in_deployment(deployment, inference_only=True)
         self.total_relative_time_estimated = START_TIME + ZOEDEPTH_BUILD_TIME + n_images * (MEGADETECTOR_TIME_PER_IMAGE + SEGMENTATION_TIME_PER_IMAGE) + n_inference_images * (ZOEDEPTH_INFER_TIME_PER_IMAGE + LABEL_TIME_PER_IMAGE)
@@ -121,7 +123,7 @@ class DepthEstimationWorker(QRunnable):
         if self.main_window.zoedepth_model:
             self.increment_progress(ZOEDEPTH_BUILD_TIME)
 
-        for deployment in self.calibration_json:            
+        for deployment in self.calibration_json:
             inference_files = self.inference_file_dict[deployment]
 
             input_dir = os.path.join(self.deployments_dir, deployment)
@@ -160,7 +162,7 @@ class DepthEstimationWorker(QRunnable):
                     self.signals.message.emit("Stopped")
                     self.signals.stopped.emit()
                     return
-                                
+                
                 # check if an image
                 ext = os.path.splitext(image_abs_path)[1].lower()
                 if not (ext == ".jpg" or ext == ".jpeg" or ext == ".png"):
