@@ -1,3 +1,4 @@
+import platform
 import numpy as np
 import os
 from PIL import Image, ImageDraw, ImageFont
@@ -65,6 +66,17 @@ class DepthEstimationWorker(QRunnable):
 
     # QRunnable override
     def run(self):
+        # make sure we can edit the output file, also create the output file so that it exists even if there is no output
+        output_filepath = os.path.join(self.root_path, "output.csv")
+        try:
+            with open(output_filepath, 'w', newline=''):
+                pass
+        except:
+            self.signals.warning_popup.emit("Failed to Access Output File", f"Failed to access the output file:\n{output_filepath}\n\nThis may be because the file is open in another program. Please close other programs accessing the file and then click 'Run Depth Estimation' again.")
+            self.signals.message.emit("Failed to access output file, please try running again.")
+            self.signals.stopped.emit()
+            return
+
         # get inference files for each deployment
         self.inference_file_dict = {}
         for deployment in self.calibration_json:
@@ -281,16 +293,15 @@ class DepthEstimationWorker(QRunnable):
                 self.main_window.csv_output_rows += output
 
                 # update the output csv
-                output_fpath = os.path.join(self.root_path, "output.csv")
                 try:
-                    with open(output_fpath, 'w', newline='') as csvfile:
+                    with open(output_filepath, 'w', newline='') as csvfile:
                         fieldnames = list(output[0].keys())
                         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                         writer.writeheader()
                         for row in self.main_window.csv_output_rows:
                             writer.writerow(row)
                 except:
-                    self.signals.warning_popup.emit("Failed to Write Output", f"Failed to write to the output file:\n{output_fpath}\n\nThis may be because the file is open in another program. Please close other programs accessing the file and then click 'Run Depth Estimation' again.")
+                    self.signals.warning_popup.emit("Failed to Write Output", f"Failed to write to the output file:\n{output_filepath}\n\nThis may be because the file is open in another program. Please close other programs accessing the file and then click 'Run Depth Estimation' again.")
                     self.signals.message.emit("Failed to write output, please try running again.")
                     self.signals.stopped.emit()
                     return
@@ -416,7 +427,12 @@ class DepthEstimationWorker(QRunnable):
 
         distance = round(float(row['animal_depth']), ndigits=1)
         text = f"{distance} m"
-        font = ImageFont.truetype("arial.ttf", size=24)
+        
+        if platform.system() == 'Darwin':       # macOS
+            font = ImageFont.truetype("Arial.ttf", size=24)
+        else:    # Windows, hopefully works on linux???
+            font = ImageFont.truetype("arial.ttf", size=24)
+        
         bbox = draw.textbbox(top_left, text, font=font)
         draw.rectangle(bbox, fill="black")
         draw.text(top_left, text, fill="white", font=font)

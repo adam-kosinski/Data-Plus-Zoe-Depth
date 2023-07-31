@@ -198,6 +198,10 @@ class MainWindow(QMainWindow):
     def open_output_csv(self):
         # cross-platform solution from here: https://stackoverflow.com/questions/434597/open-document-with-default-os-application-in-python-both-in-windows-and-mac-os
         filepath = os.path.join(self.root_path, "output.csv")
+        if not os.path.exists(filepath):
+            QMessageBox.warning(self, "No Output", "The output file does not exist. This is probably because no output was written (likely no animals were detected).")
+            return
+        
         if platform.system() == 'Darwin':       # macOS
             subprocess.call(('open', filepath))
         elif platform.system() == 'Windows':    # Windows
