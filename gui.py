@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QHBoxLayout,
     QFileDialog,
+    QMessageBox,
     QLabel,
     QPushButton
 )
@@ -65,6 +66,7 @@ class MainWindow(QMainWindow):
         ui_path = os.path.join(os.path.dirname(__file__), "gui.ui")
         uic.loadUi(ui_path, self)
         self.stopButton.hide()
+        self.openOutputCSVButton.hide()
         self.set_progress_message("")   # done here so in Qt Designer the label would still be visible
 
         self.root_path = None
@@ -83,6 +85,7 @@ class MainWindow(QMainWindow):
         # event listeners
         self.openRootFolder.clicked.connect(self.open_root_folder)
         self.runButton.clicked.connect(self.run_depth_estimation)
+        self.openOutputCSVButton.clicked.connect(lambda: os.startfile(os.path.join(self.root_path, "output.csv")))
 
         # temp
         self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
@@ -98,6 +101,11 @@ class MainWindow(QMainWindow):
             dialog.setFileMode(QFileDialog.FileMode.Directory)
             if not dialog.exec():
                 return
+            
+            if not os.path.exists(os.path.join(dialog.selectedFiles()[0], "deployments")):
+                QMessageBox.warning(self, "Invalid Folder Structure", "No subfolder named 'deployments' found, please choose a root folder with a subfolder named 'deployments.'")
+                return
+            
             self.root_path = dialog.selectedFiles()[0]
 
         self.root_path = os.path.normpath(self.root_path)    # normpath to keep slashses standardized, in case that matters
@@ -145,12 +153,13 @@ class MainWindow(QMainWindow):
 
         self.setAllButtonsEnabled(False)
         self.stopButton.show()
+        self.openOutputCSVButton.hide()
 
         # reset rows so we don't get duplicates
         self.csv_output_rows = []
         
         worker = DepthEstimationWorker(self)
-        self.stopButton.clicked.connect(worker.stop_slot)
+        self.stopButton.clicked.connect(worker.stop)
         worker.signals.message.connect(self.set_progress_message)
         worker.signals.progress.connect(self.set_progress_bar_value)
         worker.signals.stopped.connect(self.depth_estimation_thread_finished)
@@ -178,6 +187,7 @@ class MainWindow(QMainWindow):
     def depth_estimation_thread_finished(self):
         self.setAllButtonsEnabled(True)
         self.stopButton.hide()
+        self.openOutputCSVButton.show()
 
 
 

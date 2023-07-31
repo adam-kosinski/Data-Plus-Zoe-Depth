@@ -31,6 +31,8 @@ MIN_CROP_RECT_HEIGHT = CROP_HANDLE_SIZE * 3 + 10
 
 
 
+
+
 class CropManager:
     def __init__(self, main_window):
         self.main_window = main_window
@@ -38,21 +40,6 @@ class CropManager:
         
         self.scene = None   # initializes in self.open_image()
         self.view = main_window.cropGraphicsView
-
-        self.crop_rect = None   # initialized when image is opened
-
-        self.config_filepath = None
-        self.crop_image_relpath = None
-        self.saved = True
-
-        # units of the original image's pixels
-        self.image_width = 0
-        self.image_height = 0
-        self.crop_top = 0
-        self.crop_bottom = 0
-        self.crop_left = 0
-        self.crop_right = 0
-        self.resize_factor = None
 
         # event handlers
         main_window.openCropScreenButton.clicked.connect(self.open_crop_screen)
@@ -64,7 +51,29 @@ class CropManager:
         main_window.cropLeftSpinBox.valueChanged.connect(lambda new_value: self.spin_box_changed(main_window.cropLeftSpinBox))
         main_window.cropRightSpinBox.valueChanged.connect(lambda new_value: self.spin_box_changed(main_window.cropRightSpinBox))
 
-        
+        # initialize state
+        self.reset()
+
+    
+    def reset(self):
+        self.view.setScene(QGraphicsScene())
+
+        self.crop_rect = None   # initialized when image is opened
+
+        self.config_filepath = None
+        self.crop_image_relpath = None
+
+        # units of the original image's pixels
+        self.image_width = 0
+        self.image_height = 0
+        self.crop_top = 0
+        self.crop_bottom = 0
+        self.crop_left = 0
+        self.crop_right = 0
+        self.resize_factor = None
+
+        self.saved = True
+        self.main_window.saveCropButton.setEnabled(False)
 
 
     def update_root_path(self):
@@ -89,9 +98,9 @@ class CropManager:
             button = QMessageBox.question(self.main_window, "Changes Not Saved", "Are you sure you want to exit? The changes you made aren't saved.")
             if button != QMessageBox.StandardButton.Yes:
                 return
-        self.saved = True
-        self.main_window.saveCropButton.setEnabled(False)
+        
         self.main_window.screens.setCurrentWidget(self.main_window.mainScreen)
+        self.reset()
 
 
     def open_image(self, config_json=None):

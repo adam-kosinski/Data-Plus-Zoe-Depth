@@ -1,16 +1,14 @@
 import numpy as np
 import os
-import functools
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import json
 import csv
 
 from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
 
 from zoe_worker import build_zoedepth_model
-from zoedepth.utils.misc import save_raw_16bit
+from zoedepth.utils.misc import save_raw_16bit, colorize
 import run_segmentation
-from label_results import label_results
 
 # megadetector stuff
 import sys
@@ -57,11 +55,12 @@ class DepthEstimationWorker(QRunnable):
         self.progress = 0   # 0-100
 
 
-    def stop_slot(self):
+    def stop(self):
         print("stop")
         self.stop_requested = True
         self.signals.message.emit("Finding a good stopping place :)")
 
+    # QRunnable override
     def run(self):
         # get inference files for each deployment
         self.inference_file_dict = {}
@@ -288,9 +287,8 @@ class DepthEstimationWorker(QRunnable):
 
         # label images
         self.signals.message.emit("Creating labeled output images")
-        output_fpath = os.path.join(self.root_path, "output.csv")
-        if os.path.exists(output_fpath):
-            label_results(self.root_path, output_fpath)
+        output_csv_path = os.path.join(self.root_path, "output.csv")
+        self.label_results(output_csv_path)
         
         self.increment_progress(self.total_relative_time_estimated)    # finish to 100%, accounting will be off if use LABEL_TIME_PER_IMAGE b/c we originally didn't know how many output rows (= labeled images) there would be
         
@@ -332,5 +330,70 @@ class DepthEstimationWorker(QRunnable):
         intercept = self.calibration_json[deployment]["intercept"]
         calib_depth = calib_depth * slope + intercept
         return calib_depth
+
+
+    def label_results(self, csv_filepath, dest_folder="labeled_output"):
+        # file and dest folder are relative to the root path
+
+        if not os.path.exists(csv_filepath):
+            return
+
+        seen_rgb_already = []
+        seen_depth_already = []
+
+        with open(os.path.join(self.root_path, csv_filepath), newline='') as csvfile:
+            rowreader = csv.DictReader(csvfile)
+            for row in rowreader:
+                
+                # make dest directory if necessary
+                os.makedirs(os.path.join(self.root_path, dest_folder, row['deployment']), exist_ok=True)
+
+
+                # label RGB image
+                rgb_output_file = os.path.join(self.root_path, dest_folder, row['deployment'], row['filename'])
+                print(rgb_output_file)
+
+                rgb_file_to_open = rgb_output_file if rgb_output_file in seen_rgb_already else os.path.join(self.deployments_dir, row['deployment'], row['filename'])
+                with Image.open(rgb_file_to_open) as image:
+                    self.draw_annotations(image, row)
+                    image.save(rgb_output_file)
+                    seen_rgb_already.append(rgb_output_file)
+
+
+                # label depth image
+                name, ext = os.path.splitext(row['filename'])
+                depth_output_file = os.path.join(self.root_path, dest_folder, row['deployment'], name + "_depth" + ext)
+
+                if depth_output_file not in seen_depth_already:
+                    raw_depth_file = os.path.join(self.root_path, "depth_maps", row['deployment'], os.path.splitext(row['filename'])[0] + "_raw.png")
+                    with Image.open(raw_depth_file) as depth_img:
+                        depth = np.asarray(depth_img) / 256
+                        colored = colorize(depth)
+                        Image.fromarray(colored).convert("RGB").save(depth_output_file)
+                
+                with Image.open(depth_output_file) as image:
+                    self.draw_annotations(image, row)
+                    image.save(depth_output_file)
+                    seen_depth_already.append(depth_output_file)
+
+
+    def draw_annotations(self, image, row):
+        draw = ImageDraw.Draw(image)
+                
+        top_left = (int(row['bbox_x']), int(row['bbox_y']))
+        bottom_right = (top_left[0] + int(row['bbox_width']), top_left[1] + int(row['bbox_height']))
+        draw.rectangle((top_left, bottom_right), outline="red", width=3)
+
+        radius = 10
+        sample_top_left = (int(row['sample_x'])-radius, int(row['sample_y'])-radius)
+        sample_bottom_right = (int(row['sample_x'])+radius, int(row['sample_y'])+radius)
+        draw.arc((sample_top_left, sample_bottom_right), 0, 360, fill="red", width=5)
+
+        distance = round(float(row['animal_depth']), ndigits=1)
+        text = f"{distance} m"
+        font = ImageFont.truetype("arial.ttf", size=24)
+        bbox = draw.textbbox(top_left, text, font=font)
+        draw.rectangle(bbox, fill="black")
+        draw.text(top_left, text, fill="white", font=font)
 
 
