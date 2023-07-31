@@ -1,5 +1,7 @@
 import os
 import json
+from PIL import Image
+import shutil
 
 from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtWidgets import (
@@ -57,6 +59,7 @@ class CropManager:
         # initialize state
         self.reset()
 
+
     
     def reset(self):
         self.view.setScene(QGraphicsScene())
@@ -95,7 +98,11 @@ class CropManager:
             return pil_image
         
         config = self.json_data[deployment]
-        print(config)
+        
+        width, height = pil_image.size
+        if config['image_width'] != width or config['image_height'] != height:
+            raise Exception(f"Incorrect input image dimensions to CropManager.crop(), given: {width} x {height}, correct: {config['image_width']} x {config['image_height']}")
+
         box = (config['crop_left'], config['crop_top'], config['image_width'] - config['crop_right'], config['image_height'] - config['crop_bottom'])
         return pil_image.crop(box)
     
@@ -246,7 +253,32 @@ class CropManager:
 
 
     def save(self):
-        print(self.crop_top, self.crop_bottom, self.crop_left, self.crop_right)
+        # check if we need to delete anything from the old crop config
+        # if change this to deployment-specific in the future, only delete a certain deployment's data
+        calibration_dir = os.path.join(self.root_path, "calibration")
+        calibration_file = os.path.join(calibration_dir, "calibrations.json")
+        detection_dir = os.path.join(self.root_path, "detections")
+        segmentation_dir = os.path.join(self.root_path, "segmentation")
+        depth_dir = os.path.join(self.root_path, "depth_maps")
+        output_visualization_dir = os.path.join(self.root_path, "output_visualization")
+
+        prev_crop_config_data_exists = os.path.exists(calibration_file) or os.path.exists(detection_dir) or os.path.exists(segmentation_dir) or os.path.exists(depth_dir) or os.path.exists(output_visualization_dir)
+
+        if prev_crop_config_data_exists:
+            yes_no_buttons = QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            default_button = QMessageBox.StandardButton.No
+            response = QMessageBox.warning(self.main_window, "Data Loss Warning", "WARNING - You currently have data saved from a previous cropping configuration. This includes calibration data, and cached detection/depth results. Changing the cropping configuration will delete this data. Are you sure you want to proceed?", yes_no_buttons, default_button)
+            if response != QMessageBox.StandardButton.Yes:
+                return
+            
+            # remove data from previous crop config
+            shutil.rmtree(calibration_dir, ignore_errors=True)
+            shutil.rmtree(detection_dir, ignore_errors=True)
+            shutil.rmtree(segmentation_dir, ignore_errors=True)
+            shutil.rmtree(depth_dir, ignore_errors=True)
+            shutil.rmtree(output_visualization_dir, ignore_errors=True)
+
+
         # support separate crop config for each deployment, in case we add UI support for that later (or user goes in and can edit it)
         self.json_data = {}
         for deployment in os.listdir(self.main_window.deployments_dir):
@@ -267,6 +299,11 @@ class CropManager:
         self.saved = True
         self.main_window.saveCropButton.clearFocus()    # so focus doesn't jump weirdly
         self.main_window.saveCropButton.setEnabled(False)
+
+        if prev_crop_config_data_exists:
+            # refresh everything, to keep stuff up to date after we deleted things
+            # doing it down here after we finished saving
+            self.main_window.open_root_folder(self.root_path)
 
 
 

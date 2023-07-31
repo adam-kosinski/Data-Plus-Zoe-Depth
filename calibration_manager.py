@@ -121,34 +121,34 @@ class CalibrationManager:
         if deployment in json_data:
             data = json_data[deployment]
             self.ref_image_path = data["ref_image_path"]
-            self.rel_depth_path = data["rel_depth_path"]
             self.slope = data["slope"]
             self.intercept = data["intercept"]
-
-            # load reference image
-            self.init_calibration_reference_image(self.ref_image_path)
-
-            # load depth
-            depth_abspath = os.path.join(self.root_path, self.rel_depth_path)
-            with Image.open(depth_abspath) as depth_img:
-                self.rel_depth = np.asarray(depth_img) / 256
-            self.display_depth(self.rel_depth * self.slope + self.intercept)
 
             # load calibration entries
             for point in data["points"]:
                 self.add_calibration_entry(point["x"], point["y"], point["distance"])
+
+            # load reference image and depth
+            self.choose_ref_image(os.path.join(self.root_path, self.ref_image_path))
+
         
-    def choose_ref_image(self):
-        open_directory = os.path.join(self.deployments_dir, self.deployment)
-        dialog = QFileDialog(parent=self.main_window, caption="Choose Reference Image", directory=open_directory)
-        dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
-        dialog.setNameFilter("*.jpg *.jpeg *.png")
-        if not dialog.exec():
-            return
+    def choose_ref_image(self, abs_path=None):
+        if not abs_path:
+            open_directory = os.path.join(self.deployments_dir, self.deployment)
+            dialog = QFileDialog(parent=self.main_window, caption="Choose Reference Image", directory=open_directory)
+            dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+            dialog.setNameFilter("*.jpg *.jpeg *.png")
+            if not dialog.exec():
+                return
+            abs_path = dialog.selectedFiles()[0]
         
-        abs_path = dialog.selectedFiles()[0]
         self.ref_image_path = os.path.relpath(abs_path, self.root_path)
-        self.init_calibration_reference_image(self.ref_image_path)
+        try:
+            self.init_calibration_reference_image(self.ref_image_path)
+        except:
+            QMessageBox.warning(self.main_window, "Failed to Open Image", "The reference image you provided cannot be loaded, probably because its dimensions do not match the dimensions of the crop configuration image for this deployment.")
+            self.ref_image_path = None
+            return
 
         # start relative depth calculation, check for depth map first to avoid recalculation
         self.set_background(self.depth_view, QPixmap())
@@ -163,7 +163,7 @@ class CalibrationManager:
                 self.rel_depth = np.asarray(depth_img) / 256
             self.display_depth(self.rel_depth)
         else:
-            worker = ZoeWorker(self.main_window, abs_path)
+            worker = ZoeWorker(self.main_window, abs_path, self.deployment)
             worker.signals.result.connect(self.process_zoe_result)
             self.main_window.threadpool.start(worker)
 
@@ -175,7 +175,7 @@ class CalibrationManager:
         with Image.open(abs_fpath).convert("RGBA") as pil_ref_image:
             print(pil_ref_image.mode)
             cropped_pil_image = self.main_window.crop_manager.crop(pil_ref_image, self.deployment)
-        
+
         self.ref_pixmap = QPixmap.fromImage(ImageQt(cropped_pil_image))
         self.ref_pixmap = self.ref_pixmap.scaledToWidth(400, mode=Qt.TransformationMode.SmoothTransformation)
         self.set_background(self.ref_view, self.ref_pixmap)

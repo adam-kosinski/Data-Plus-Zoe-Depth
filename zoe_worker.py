@@ -24,10 +24,11 @@ class ZoeDepthResultSignal(QObject):
 
 class ZoeWorker(QRunnable):
     # convenience runnable, if code is already in a separate thread it can just run zoedepth itself
-    def __init__(self, main_window, rgb_filename):
+    def __init__(self, main_window, rgb_filename, deployment):
         super().__init__()
         self.main_window = main_window
         self.rgb_filename = rgb_filename
+        self.deployment = deployment
         self.signals = ZoeDepthResultSignal()
 
     def run(self):
@@ -36,6 +37,7 @@ class ZoeWorker(QRunnable):
 
         print("Running ZoeDepth on " + self.rgb_filename)
         with Image.open(self.rgb_filename).convert("RGB") as image:
-            depth = self.main_window.zoedepth_model.infer_pil(image)  # as numpy
+            cropped_image = self.main_window.crop_manager.crop(image, self.deployment)
+            depth = self.main_window.zoedepth_model.infer_pil(cropped_image)  # as numpy
             print("zoe worker finished inference")
             self.signals.result.emit(depth, self.rgb_filename)
