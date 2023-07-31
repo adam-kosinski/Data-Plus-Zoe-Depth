@@ -21,6 +21,7 @@ import run_detector_batch
 SEGMENTATION_RESIZE_FACTOR = 4
 
 # measured times in seconds used for progress bar, treat as relative though in case computer faster etc
+START_TIME = 4  # show a little bit of the progress bar right at the start to let the user know stuff is happening
 MEGADETECTOR_TIME_PER_IMAGE = 4.5
 SEGMENTATION_TIME_PER_IMAGE = 2
 ZOEDEPTH_BUILD_TIME = 12
@@ -75,8 +76,10 @@ class DepthEstimationWorker(QRunnable):
         for deployment in os.listdir(self.deployments_dir):
             n_images += self.n_files_in_deployment(deployment)
             n_inference_images += self.n_files_in_deployment(deployment, inference_only=True)
-        self.total_relative_time_estimated = ZOEDEPTH_BUILD_TIME + n_images * (MEGADETECTOR_TIME_PER_IMAGE + SEGMENTATION_TIME_PER_IMAGE) + n_inference_images * (ZOEDEPTH_INFER_TIME_PER_IMAGE + LABEL_TIME_PER_IMAGE)
+        self.total_relative_time_estimated = START_TIME + ZOEDEPTH_BUILD_TIME + n_images * (MEGADETECTOR_TIME_PER_IMAGE + SEGMENTATION_TIME_PER_IMAGE) + n_inference_images * (ZOEDEPTH_INFER_TIME_PER_IMAGE + LABEL_TIME_PER_IMAGE)
         self.progress = 0   # 0-100
+
+        self.increment_progress(START_TIME)
 
 
         # run megadetector (do all of this before zoedepth to avoid weird conflicts when building the zoe model)
@@ -93,6 +96,9 @@ class DepthEstimationWorker(QRunnable):
                 input_dir = os.path.join(self.deployments_dir, deployment)
                 args = ["megadetector_weights/md_v5a.0.0.pt", input_dir, output_file, "--threshold", "0.5"]
                 run_detector_batch.main(args)
+
+                # bboxes were evaluated on uncropped image, adjust for cropped image
+                self.main_window.crop_manager.crop_megadetector_bboxes(output_file, deployment)
 
                 if self.stop_requested:
                     self.signals.message.emit("Stopped")
@@ -283,7 +289,8 @@ class DepthEstimationWorker(QRunnable):
                             writer.writerow(row)
                 except:
                     self.signals.warning_popup.emit("Failed to Write Output", f"Failed to write to the output file:\n{output_fpath}\n\nThis may be because the file is open in another program. Please close other programs accessing the file and then click 'Run Depth Estimation' again.")
-                    self.signals.done.emit()
+                    self.signals.message.emit("Failed to write output, please try running again.")
+                    self.signals.stopped.emit()
                     return
         
 
@@ -296,6 +303,11 @@ class DepthEstimationWorker(QRunnable):
         output_csv_path = os.path.join(self.root_path, "output.csv")
         self.label_results(output_csv_path)
         
+        if self.stop_requested:
+            self.signals.message.emit("Stopped")
+            self.signals.stopped.emit()
+            return
+
         self.increment_progress(self.total_relative_time_estimated)    # finish to 100%, accounting will be off if use LABEL_TIME_PER_IMAGE b/c we originally didn't know how many output rows (= labeled images) there would be
         
         print("DONE!!!!!!!!!!!!!!!!!!!!")
@@ -307,6 +319,9 @@ class DepthEstimationWorker(QRunnable):
         if inference_only:
             if deployment not in self.inference_file_dict:
                 return 0
+            if not os.path.isdir(os.path.join(self.deployments_dir, deployment)):
+                return 0
+            
             return len(self.inference_file_dict[deployment])
         return len(os.listdir(os.path.join(self.deployments_dir, deployment)))
 
@@ -350,6 +365,8 @@ class DepthEstimationWorker(QRunnable):
         with open(os.path.join(self.root_path, csv_filepath), newline='') as csvfile:
             rowreader = csv.DictReader(csvfile)
             for row in rowreader:
+                if self.stop_requested:
+                    return  # run() function will take care of emits and messaging
                 
                 # make dest directory if necessary
                 os.makedirs(os.path.join(self.root_path, dest_folder, row['deployment']), exist_ok=True)

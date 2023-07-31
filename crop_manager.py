@@ -37,7 +37,10 @@ class CropManager:
     def __init__(self, main_window):
         self.main_window = main_window
         self.root_path = None   # shortcut for main window's root path
-        
+        self.config_filepath = None # don't know root path yet
+
+        self.json_data = {}
+
         self.scene = None   # initializes in self.open_image()
         self.view = main_window.cropGraphicsView
 
@@ -52,7 +55,6 @@ class CropManager:
         main_window.cropRightSpinBox.valueChanged.connect(lambda new_value: self.spin_box_changed(main_window.cropRightSpinBox))
 
         # initialize state
-        self.config_filepath = None # don't know root path yet
         self.reset()
 
     
@@ -75,28 +77,49 @@ class CropManager:
         self.saved = True
         self.main_window.saveCropButton.setEnabled(False)
 
-        self.main_window.cropImageDimensionsLabel.setText(f"{self.image_width} x {self.image_height}")
-        self.main_window.cropTopSpinBox.setValue(self.crop_top)
-        self.main_window.cropBottomSpinBox.setValue(self.crop_bottom)
-        self.main_window.cropLeftSpinBox.setValue(self.crop_left)
-        self.main_window.cropRightSpinBox.setValue(self.crop_right)
-
+        self.main_window.cropImageDimensionsLabel.setText("0 x 0")
+        self.main_window.cropTopSpinBox.setValue(0)
+        self.main_window.cropBottomSpinBox.setValue(0)
+        self.main_window.cropLeftSpinBox.setValue(0)
+        self.main_window.cropRightSpinBox.setValue(0)
+    
 
     def update_root_path(self):
         self.root_path = self.main_window.root_path
         self.config_filepath = os.path.join(self.main_window.root_path, "crop_config.json")
+        self.load_config_if_it_exists()
+
+
+    def crop(self, pil_image, deployment):
+        if deployment not in self.json_data:
+            return pil_image
+        
+        config = self.json_data[deployment]
+        print(config)
+        box = (config['crop_left'], config['crop_top'], config['image_width'] - config['crop_right'], config['image_height'] - config['crop_bottom'])
+        return pil_image.crop(box)
+    
+
+    def crop_megadetector_bboxes(self, megadetector_output_filepath, deployment):
+        if deployment not in self.json_data:
+            return
+        
+        # TODO
+        
 
 
     def open_crop_screen(self):
         self.main_window.screens.setCurrentWidget(self.main_window.cropScreen)
+        self.load_config_if_it_exists()
+        
 
-        # open previous config if it exists
-        if os.path.exists(self.config_filepath):
+    def load_config_if_it_exists(self):
+        if self.config_filepath and os.path.exists(self.config_filepath):
             with open(self.config_filepath) as json_file:
-                json_data = json.load(json_file)
-                first_deployment = list(json_data.keys())[0]
+                self.json_data = json.load(json_file)
+                first_deployment = list(self.json_data.keys())[0]
 
-            self.open_image(json_data[first_deployment])
+            self.open_image(self.json_data[first_deployment])
 
 
     def back_to_main_screen(self):
@@ -225,9 +248,11 @@ class CropManager:
     def save(self):
         print(self.crop_top, self.crop_bottom, self.crop_left, self.crop_right)
         # support separate crop config for each deployment, in case we add UI support for that later (or user goes in and can edit it)
-        json_data = {}
+        self.json_data = {}
         for deployment in os.listdir(self.main_window.deployments_dir):
-            json_data[deployment] = {
+            if not os.path.isdir(os.path.join(self.main_window.deployments_dir, deployment)):
+                continue
+            self.json_data[deployment] = {
                 "image_width": self.image_width,
                 "image_height": self.image_height,
                 "crop_top": self.crop_top,
@@ -237,7 +262,7 @@ class CropManager:
                 "crop_image_relpath": self.crop_image_relpath
             }
         with open(self.config_filepath, 'w') as json_file:
-            json.dump(json_data, json_file, indent=4)
+            json.dump(self.json_data, json_file, indent=4)
         
         self.saved = True
         self.main_window.saveCropButton.clearFocus()    # so focus doesn't jump weirdly

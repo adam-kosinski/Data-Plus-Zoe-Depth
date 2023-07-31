@@ -2,6 +2,7 @@ import numpy as np
 import os
 import math
 from PIL import Image
+from PIL.ImageQt import ImageQt
 import json
 
 from gui_utils import clear_layout_contents, depth_to_pixmap
@@ -170,8 +171,15 @@ class CalibrationManager:
         abs_fpath = os.path.join(self.root_path, fpath)
 
         # display pixmap background
-        self.ref_pixmap = QPixmap(abs_fpath).scaledToWidth(400, mode=Qt.TransformationMode.SmoothTransformation)
+        # note: ImageQt crashes / behaves weird for "RGB" PIL images, convert to "RGBA" to avoid weirdness
+        with Image.open(abs_fpath).convert("RGBA") as pil_ref_image:
+            print(pil_ref_image.mode)
+            cropped_pil_image = self.main_window.crop_manager.crop(pil_ref_image, self.deployment)
+        
+        self.ref_pixmap = QPixmap.fromImage(ImageQt(cropped_pil_image))
+        self.ref_pixmap = self.ref_pixmap.scaledToWidth(400, mode=Qt.TransformationMode.SmoothTransformation)
         self.set_background(self.ref_view, self.ref_pixmap)
+        
         # sizing
         self.ref_view.setMinimumSize(self.ref_pixmap.width(), self.ref_pixmap.height())
         self.depth_view.setMinimumSize(self.ref_pixmap.width(), self.ref_pixmap.height())

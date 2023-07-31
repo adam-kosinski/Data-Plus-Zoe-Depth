@@ -88,7 +88,7 @@ class MainWindow(QMainWindow):
         self.openOutputCSVButton.clicked.connect(lambda: os.startfile(os.path.join(self.root_path, "output.csv")))
 
         # temp
-        # self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
+        # self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/uncropped_test")
         self.resize(QSize(800, 600))
 
 
@@ -163,7 +163,7 @@ class MainWindow(QMainWindow):
         worker.signals.warning_popup.connect(self.warning_popup)
         worker.signals.message.connect(self.set_progress_message)
         worker.signals.progress.connect(self.set_progress_bar_value)
-        worker.signals.stopped.connect(self.depth_estimation_thread_finished)
+        worker.signals.stopped.connect(self.depth_estimation_thread_finished)   # separate signal than done for clarity, and in case we want different behavior in the future
         worker.signals.done.connect(self.depth_estimation_thread_finished)
         
         self.progressBar.reset()
