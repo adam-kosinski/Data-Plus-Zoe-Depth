@@ -2,6 +2,8 @@ import numpy as np
 import os
 import functools
 from PIL import Image
+import subprocess
+import platform
 
 from PyQt6.QtCore import QSize, Qt, QRunnable, QThreadPool, pyqtSignal, QThread, QObject
 from PyQt6.QtWidgets import (
@@ -85,7 +87,7 @@ class MainWindow(QMainWindow):
         # event listeners
         self.openRootFolder.clicked.connect(self.open_root_folder)
         self.runButton.clicked.connect(self.run_depth_estimation)
-        self.openOutputCSVButton.clicked.connect(lambda: os.startfile(os.path.join(self.root_path, "output.csv")))
+        self.openOutputCSVButton.clicked.connect(self.open_output_csv)
 
         # temp
         # self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/uncropped_test")
@@ -192,6 +194,16 @@ class MainWindow(QMainWindow):
         self.setAllButtonsEnabled(True)
         self.stopButton.hide()
         self.openOutputCSVButton.show()
+    
+    def open_output_csv(self):
+        # cross-platform solution from here: https://stackoverflow.com/questions/434597/open-document-with-default-os-application-in-python-both-in-windows-and-mac-os
+        filepath = os.path.join(self.root_path, "output.csv")
+        if platform.system() == 'Darwin':       # macOS
+            subprocess.call(('open', filepath))
+        elif platform.system() == 'Windows':    # Windows
+            os.startfile(filepath)
+        else:                                   # linux variants
+            subprocess.call(('xdg-open', filepath))
 
 
 
