@@ -88,7 +88,7 @@ class MainWindow(QMainWindow):
         self.openOutputCSVButton.clicked.connect(lambda: os.startfile(os.path.join(self.root_path, "output.csv")))
 
         # temp
-        self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
+        # self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
         self.resize(QSize(800, 600))
 
 
@@ -160,6 +160,7 @@ class MainWindow(QMainWindow):
         
         worker = DepthEstimationWorker(self)
         self.stopButton.clicked.connect(worker.stop)
+        worker.signals.warning_popup.connect(self.warning_popup)
         worker.signals.message.connect(self.set_progress_message)
         worker.signals.progress.connect(self.set_progress_bar_value)
         worker.signals.stopped.connect(self.depth_estimation_thread_finished)
@@ -177,6 +178,9 @@ class MainWindow(QMainWindow):
         for hbox in self.deployment_hboxes.values():
             button = hbox.itemAt(0).widget()
             button.setEnabled(enable)
+
+    def warning_popup(self, title, message):
+        QMessageBox.warning(self, title, message)
 
     def set_progress_message(self, message):
         self.progressMessage.setText(message)

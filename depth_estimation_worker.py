@@ -5,6 +5,7 @@ import json
 import csv
 
 from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
+from PyQt6.QtWidgets import QMessageBox
 
 from zoe_worker import build_zoedepth_model
 from zoedepth.utils.misc import save_raw_16bit, colorize
@@ -29,6 +30,7 @@ LABEL_TIME_PER_IMAGE = 0.5
 
 class DepthEstimationSignals(QObject):
     message = pyqtSignal(str)
+    warning_popup = pyqtSignal(str, str)    # title, message
     progress = pyqtSignal(float)  # 0-100 for progress percentage
     megadetector_done = pyqtSignal()
     start_deployment = pyqtSignal(str)  # string with deployment name
@@ -272,13 +274,17 @@ class DepthEstimationWorker(QRunnable):
 
                 # update the output csv
                 output_fpath = os.path.join(self.root_path, "output.csv")
-                with open(output_fpath, 'w', newline='') as csvfile:
-                    fieldnames = list(output[0].keys())
-                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                    writer.writeheader()
-                    for row in self.main_window.csv_output_rows:
-                        writer.writerow(row)
-                
+                try:
+                    with open(output_fpath, 'w', newline='') as csvfile:
+                        fieldnames = list(output[0].keys())
+                        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                        writer.writeheader()
+                        for row in self.main_window.csv_output_rows:
+                            writer.writerow(row)
+                except:
+                    self.signals.warning_popup.emit("Failed to Write Output", f"Failed to write to the output file:\n{output_fpath}\n\nThis may be because the file is open in another program. Please close other programs accessing the file and then click 'Run Depth Estimation' again.")
+                    self.signals.done.emit()
+                    return
         
 
         # keep scrollbar updated correctly if we never needed to build the depth model

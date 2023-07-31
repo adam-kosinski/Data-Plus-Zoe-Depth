@@ -52,6 +52,7 @@ class CropManager:
         main_window.cropRightSpinBox.valueChanged.connect(lambda new_value: self.spin_box_changed(main_window.cropRightSpinBox))
 
         # initialize state
+        self.config_filepath = None # don't know root path yet
         self.reset()
 
     
@@ -59,9 +60,8 @@ class CropManager:
         self.view.setScene(QGraphicsScene())
 
         self.crop_rect = None   # initialized when image is opened
-
-        self.config_filepath = None
-        self.crop_image_relpath = None
+        
+        self.resize_factor = None   # image width * self.resize_factor = pixmap width
 
         # units of the original image's pixels
         self.image_width = 0
@@ -70,10 +70,16 @@ class CropManager:
         self.crop_bottom = 0
         self.crop_left = 0
         self.crop_right = 0
-        self.resize_factor = None
+        self.crop_image_relpath = None
 
         self.saved = True
         self.main_window.saveCropButton.setEnabled(False)
+
+        self.main_window.cropImageDimensionsLabel.setText(f"{self.image_width} x {self.image_height}")
+        self.main_window.cropTopSpinBox.setValue(self.crop_top)
+        self.main_window.cropBottomSpinBox.setValue(self.crop_bottom)
+        self.main_window.cropLeftSpinBox.setValue(self.crop_left)
+        self.main_window.cropRightSpinBox.setValue(self.crop_right)
 
 
     def update_root_path(self):
