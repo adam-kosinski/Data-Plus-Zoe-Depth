@@ -161,7 +161,7 @@ class CalibrationManager:
             self.rel_depth_path = os.path.relpath(depth_path, start=self.root_path)
             with Image.open(depth_path) as depth_img:
                 self.rel_depth = np.asarray(depth_img) / 256
-            self.display_depth(self.rel_depth)
+            self.update_depth_display()
         else:
             worker = ZoeWorker(self.main_window, abs_path, self.deployment)
             worker.signals.result.connect(self.process_zoe_result)
@@ -193,13 +193,14 @@ class CalibrationManager:
         self.rel_depth_path = os.path.relpath(abs_path, start=self.root_path)
         save_raw_16bit(depth, abs_path)
         # update things
-        self.display_depth(depth)
         self.rel_depth = depth
+        self.update_depth_display()
         self.update_calibration()
 
-    def display_depth(self, depth):
+    def update_depth_display(self):
+        corrected_depth = np.maximum(0.0, self.rel_depth * self.slope + self.intercept)
         self.depth_view.setScene(self.scene)
-        self.set_background(self.depth_view, depth_to_pixmap(depth, rescale_width=PIXMAP_WIDTH))
+        self.set_background(self.depth_view, depth_to_pixmap(corrected_depth, rescale_width=PIXMAP_WIDTH))
 
     def set_background(self, graphics_view, pixmap):
         graphics_view.drawBackground = lambda painter, rect: painter.drawPixmap(rect, pixmap, rect)
@@ -271,9 +272,7 @@ class CalibrationManager:
         self.slope, self.intercept = np.linalg.lstsq(A, b, rcond=None)[0]
         print(self.slope, self.intercept)
 
-        # correct the depth map
-        corrected = np.maximum(0.0, self.rel_depth * self.slope + self.intercept)
-        self.set_background(self.depth_view, depth_to_pixmap(corrected, rescale_width=PIXMAP_WIDTH))
+        self.update_depth_display()
 
         # update deployment json
         self.saved = False
@@ -308,7 +307,7 @@ class CalibrationManager:
         if x < 0 or x >= self.rel_depth.shape[1] or y < 0 or y >= self.rel_depth.shape[0]:
             box.hide()
             return
-        depth_val = self.rel_depth[y][x] * self.slope + self.intercept
+        depth_val = max(0.0, self.rel_depth[y][x] * self.slope + self.intercept)
         depth_val = round(10 * depth_val) / 10
         
         box.show()

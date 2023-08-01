@@ -1,16 +1,21 @@
-import platform
 import numpy as np
 import os
 from PIL import Image, ImageDraw, ImageFont
 import json
 import csv
+from skimage.feature import local_binary_pattern
+from skimage.exposure import equalize_hist
+from skimage import filters
+from skimage.morphology import disk, opening
+from r_pca import R_pca
+import random
+import platform
 
 from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
 from PyQt6.QtWidgets import QMessageBox
 
 from zoe_worker import build_zoedepth_model
 from zoedepth.utils.misc import save_raw_16bit, colorize
-import run_segmentation
 
 # megadetector stuff
 import sys
@@ -27,17 +32,12 @@ MEGADETECTOR_TIME_PER_IMAGE = 4.5
 SEGMENTATION_TIME_PER_IMAGE = 2
 ZOEDEPTH_BUILD_TIME = 12
 ZOEDEPTH_INFER_TIME_PER_IMAGE = 20
-LABEL_TIME_PER_IMAGE = 0.5
 
 
 class DepthEstimationSignals(QObject):
     message = pyqtSignal(str)
     warning_popup = pyqtSignal(str, str)    # title, message
     progress = pyqtSignal(float)  # 0-100 for progress percentage
-    megadetector_done = pyqtSignal()
-    start_deployment = pyqtSignal(str)  # string with deployment name
-
-    # zoedepth_progress = pyqtSignal(int, int)   # current index (starting at 1), total files to process
     stopped = pyqtSignal()  # separate signal than done for clarity, and perhaps useful in the future
     done = pyqtSignal()
 
@@ -64,8 +64,10 @@ class DepthEstimationWorker(QRunnable):
         self.stop_requested = True
         self.signals.message.emit("Finding a good stopping place :)")
 
+
     # QRunnable override
     def run(self):
+
         # make sure we can edit the output file, also create the output file so that it exists even if there is no output
         output_filepath = os.path.join(self.root_path, "output.csv")
         try:
@@ -78,6 +80,7 @@ class DepthEstimationWorker(QRunnable):
             return
 
         # get inference files for each deployment
+        self.signals.message.emit("Selecting images to do inference on")
         self.inference_file_dict = {}
         for deployment in self.calibration_json:
             self.inference_file_dict[deployment] = self.choose_inference_files(deployment)
@@ -90,10 +93,34 @@ class DepthEstimationWorker(QRunnable):
                 continue
             n_images += self.n_files_in_deployment(deployment)
             n_inference_images += self.n_files_in_deployment(deployment, inference_only=True)
-        self.total_relative_time_estimated = START_TIME + ZOEDEPTH_BUILD_TIME + n_images * (MEGADETECTOR_TIME_PER_IMAGE + SEGMENTATION_TIME_PER_IMAGE) + n_inference_images * (ZOEDEPTH_INFER_TIME_PER_IMAGE + LABEL_TIME_PER_IMAGE)
+        self.total_relative_time_estimated = START_TIME + ZOEDEPTH_BUILD_TIME + n_images * (MEGADETECTOR_TIME_PER_IMAGE + SEGMENTATION_TIME_PER_IMAGE) + n_inference_images * ZOEDEPTH_INFER_TIME_PER_IMAGE
         self.progress = 0   # 0-100
 
         self.increment_progress(START_TIME)
+
+
+
+        # check that all images are the same dimensions in each deployment
+        self.signals.message.emit("Checking image dimensions")
+        for deployment in self.calibration_json:
+            image_name = None
+            image_width = None
+            image_height = None
+            for file in os.listdir(os.path.join(self.deployments_dir, deployment)):
+                ext = os.path.splitext(file)[1].lower()
+                if not (ext == ".jpg" or ext == ".jpeg" or ext == ".png"):
+                    continue
+                with Image.open(os.path.join(self.deployments_dir, deployment, file)) as image:
+                    if not image_width:
+                        image_name = file
+                        image_width = image.size[0]
+                        image_height = image.size[1]
+                    elif image.size[0] != image_width or image.size[1] != image_height:
+                        self.signals.warning_popup.emit("Image Sizes Do Not Match", f"The following images in deployment '{deployment}' have different sizes:\n\n{image_name}: {image_width} x {image_height}\n{file}: {image.size[0]} x {image.size[1]}\n\nAll images in a deployment must have the same dimensions for automatic cropping and segmentation to work properly. Please correct this and then click 'Run Distance Estimation' again.")
+                        self.signals.message.emit(f"Images in deployment '{deployment}' not all the same size, please fix and try running again.")
+                        self.signals.stopped.emit()
+                        return
+
 
 
         # run megadetector (do all of this before zoedepth to avoid weird conflicts when building the zoe model)
@@ -123,13 +150,12 @@ class DepthEstimationWorker(QRunnable):
             print("Megadetector done with deployment", deployment)
         
         print("Megadetector done")
-        self.signals.megadetector_done.emit()
         
 
 
 
-        # run zoedepth, segmentation, and get animal distances
-        # by default, don't load zoedepth, only load it if we need it
+        # do the rest of the pipeline after megadetector
+        
 
         # if zoedepth was already built, reflect that in the progress bar
         if self.main_window.zoedepth_model:
@@ -139,9 +165,7 @@ class DepthEstimationWorker(QRunnable):
             inference_files = self.inference_file_dict[deployment]
 
             input_dir = os.path.join(self.deployments_dir, deployment)
-            segmentation_dir = os.path.join(self.root_path, "segmentation", deployment)
             depth_maps_dir = os.path.join(self.root_path, "depth_maps", deployment)
-            os.makedirs(segmentation_dir, exist_ok=True)
             os.makedirs(depth_maps_dir, exist_ok=True)
 
             detection_json_path = os.path.join(detections_dir, deployment + ".json")
@@ -156,14 +180,14 @@ class DepthEstimationWorker(QRunnable):
             
             # segmentation
             self.signals.message.emit(f"{deployment} - running segmentation")
-            segmentation_filepath_dict = run_segmentation.main(input_dir, output_dir=segmentation_dir, resize_factor=SEGMENTATION_RESIZE_FACTOR, inference_files=inference_files)
+            segmentation_filepath_dict = self.run_segmentation(deployment, resize_factor=SEGMENTATION_RESIZE_FACTOR, inference_files=inference_files)
             self.increment_progress(self.n_files_in_deployment(deployment) * SEGMENTATION_TIME_PER_IMAGE)
             if self.stop_requested:
                 self.signals.message.emit("Stopped")
                 self.signals.stopped.emit()
                 return
-
-
+            
+            
 
             # run zoedepth
 
@@ -179,12 +203,14 @@ class DepthEstimationWorker(QRunnable):
                 ext = os.path.splitext(image_abs_path)[1].lower()
                 if not (ext == ".jpg" or ext == ".jpeg" or ext == ".png"):
                     continue
+                
 
                 # get detections, and skip this image if no animals detected
                 detections = []
                 for obj in bbox_json["images"]:
                     if obj["file"] == image_abs_path:
                         detections = list(filter(lambda detection: detection["category"] == "1", obj["detections"]))   # category animal
+                
                 if len(detections) == 0:
                     continue
                 
@@ -229,6 +255,7 @@ class DepthEstimationWorker(QRunnable):
                 # we could do this after processing all the files from this deployment, but one file at a time lets you see the results popping up in real time :)
 
                 output = []
+                animal_mask_union = np.zeros(depth.shape).astype(bool)   # union of segmentation masks inside bounding boxes, used for visualization
 
                 for detection in detections:
                     
@@ -242,12 +269,21 @@ class DepthEstimationWorker(QRunnable):
                     bbox_h = int(h*b[3])
                     bbox_depth = depth[bbox_y:bbox_y+bbox_h, bbox_x:bbox_x+bbox_w]
 
-                    # get bbox depth mask
+                    # get bbox segmentation mask
                     with Image.open(segmentation_filepath_dict[image_abs_path]) as mask_img:
                         mask_img = mask_img.resize((mask_img.width * SEGMENTATION_RESIZE_FACTOR, mask_img.height * SEGMENTATION_RESIZE_FACTOR))
-                        animal_mask = np.asarray(mask_img)
+                        animal_mask_data = np.asarray(mask_img)
+                        
+                        # animal mask data might not be the exact same shape as our depth image, since we were doing resizing
+                        # fix that by cropping the animal mask data to the depth map shape (fixing if it was too big)
+                        # and then pasting it onto a numpy array of zeros of the depth map shape (fixing if it was too small)
+                        animal_mask = np.zeros(depth.shape)
+                        animal_mask_data = animal_mask_data[0:depth.shape[0], 0:depth.shape[1]]
+                        animal_mask[0:animal_mask_data.shape[0], 0:animal_mask_data.shape[1]] = animal_mask_data
+
                         bbox_animal_mask = animal_mask[bbox_y:bbox_y+bbox_h, bbox_x:bbox_x+bbox_w]
                         bbox_animal_mask = bbox_animal_mask.astype(bool)
+                        animal_mask_union[bbox_y:bbox_y+bbox_h, bbox_x:bbox_x+bbox_w] = bbox_animal_mask
                     
                     # get depth estimate
                     segmentation_median_estimate = np.median(bbox_depth[bbox_animal_mask]) if True in bbox_animal_mask else None
@@ -277,7 +313,7 @@ class DepthEstimationWorker(QRunnable):
                     output.append({
                         "deployment": deployment,
                         "filename": os.path.basename(image_abs_path),
-                        "animal_depth": depth_estimate,
+                        "animal_distance": depth_estimate,
                         "bbox_x": bbox_x,
                         "bbox_y": bbox_y,
                         "bbox_width": bbox_w,
@@ -306,25 +342,49 @@ class DepthEstimationWorker(QRunnable):
                     self.signals.message.emit("Failed to write output, please try running again.")
                     self.signals.stopped.emit()
                     return
+                
+                
+                # create output visualization
+
+                visualization_dir = os.path.join(self.root_path, "output_visualization", deployment)
+                os.makedirs(visualization_dir, exist_ok=True)
+
+                # label RGB image, once without segmentation mask and once with it
+                with Image.open(image_abs_path) as rgb_image:
+                    cropped_rgb_image = self.main_window.crop_manager.crop(rgb_image, deployment)
+                    cropped_rgb_image_segmentation = cropped_rgb_image.copy()
+
+                    # normal
+                    for row in output:
+                        self.draw_annotations(cropped_rgb_image, row)
+                    rgb_output_file = os.path.join(visualization_dir, os.path.basename(image_abs_path))
+                    cropped_rgb_image.save(rgb_output_file)
+
+                    # with segmentation mask
+                    animal_segmentation_mask_image = Image.fromarray(animal_mask_union * 255).convert("L")
+                    cropped_rgb_image_segmentation.paste("yellow", (0,0), animal_segmentation_mask_image)
+                    for row in output:
+                        self.draw_annotations(cropped_rgb_image_segmentation, row)
+                    name, ext = os.path.splitext(os.path.basename(image_abs_path))
+                    rgb_segmentation_output_file = os.path.join(visualization_dir, name + "a_segmentation" + ext)
+                    cropped_rgb_image_segmentation.save(rgb_segmentation_output_file)
+                
+                # label depth image
+                depth_image = Image.fromarray(colorize(depth)).convert("RGB")
+                for row in output:
+                    self.draw_annotations(depth_image, row)
+                name, ext = os.path.splitext(os.path.basename(image_abs_path))
+                depth_output_file = os.path.join(visualization_dir, name + "b_depth" + ext)
+                depth_image.save(depth_output_file)
         
 
         # keep scrollbar updated correctly if we never needed to build the depth model
         if not self.main_window.zoedepth_model:
             self.increment_progress(ZOEDEPTH_BUILD_TIME)
-
-        # label images
-        self.signals.message.emit("Creating labeled output images")
-        output_csv_path = os.path.join(self.root_path, "output.csv")
-        self.label_results(output_csv_path)
         
-        if self.stop_requested:
-            self.signals.message.emit("Stopped")
-            self.signals.stopped.emit()
-            return
-
-        self.increment_progress(self.total_relative_time_estimated)    # finish to 100%, accounting will be off if use LABEL_TIME_PER_IMAGE b/c we originally didn't know how many output rows (= labeled images) there would be
-        
+       
         print("DONE!!!!!!!!!!!!!!!!!!!!")
+        self.increment_progress(self.total_relative_time_estimated)    # finish to 100%, in case accounting was a bit off
         self.signals.message.emit("Done!")
         self.signals.done.emit()
 
@@ -339,10 +399,12 @@ class DepthEstimationWorker(QRunnable):
             return len(self.inference_file_dict[deployment])
         return len(os.listdir(os.path.join(self.deployments_dir, deployment)))
 
+
     def increment_progress(self, relative_time_increment):
         self.progress += 100 * relative_time_increment / self.total_relative_time_estimated
         self.progress = min(100, self.progress)
         self.signals.progress.emit(self.progress)
+
 
     def choose_inference_files(self, deployment):
         # not all image files in a deployment are necessarily being used for inference
@@ -351,6 +413,8 @@ class DepthEstimationWorker(QRunnable):
         inference_files = []
         input_dir = os.path.join(self.deployments_dir, deployment)
         for file in os.listdir(input_dir):
+            if not os.path.isfile(os.path.join(input_dir, file)):
+                continue
             s = os.path.splitext(file)[0]
             if "-" not in s:
                 inference_files.append(os.path.abspath(os.path.join(input_dir, file)))
@@ -367,54 +431,6 @@ class DepthEstimationWorker(QRunnable):
         return calib_depth
 
 
-    def label_results(self, csv_filepath, dest_folder="labeled_output"):
-        # file and dest folder are relative to the root path
-
-        if not os.path.exists(csv_filepath):
-            return
-
-        seen_rgb_already = []
-        seen_depth_already = []
-
-        with open(os.path.join(self.root_path, csv_filepath), newline='') as csvfile:
-            rowreader = csv.DictReader(csvfile)
-            for row in rowreader:
-                if self.stop_requested:
-                    return  # run() function will take care of emits and messaging
-                
-                # make dest directory if necessary
-                os.makedirs(os.path.join(self.root_path, dest_folder, row['deployment']), exist_ok=True)
-
-
-                # label RGB image
-                rgb_output_file = os.path.join(self.root_path, dest_folder, row['deployment'], row['filename'])
-                print(rgb_output_file)
-
-                rgb_file_to_open = rgb_output_file if rgb_output_file in seen_rgb_already else os.path.join(self.deployments_dir, row['deployment'], row['filename'])
-                with Image.open(rgb_file_to_open) as image:
-                    cropped_image = self.main_window.crop_manager.crop(image, row['deployment'])
-                    self.draw_annotations(cropped_image, row)
-                    cropped_image.save(rgb_output_file)
-                    seen_rgb_already.append(rgb_output_file)
-
-
-                # label depth image
-                name, ext = os.path.splitext(row['filename'])
-                depth_output_file = os.path.join(self.root_path, dest_folder, row['deployment'], name + "_depth" + ext)
-
-                if depth_output_file not in seen_depth_already:
-                    raw_depth_file = os.path.join(self.root_path, "depth_maps", row['deployment'], os.path.splitext(row['filename'])[0] + "_raw.png")
-                    with Image.open(raw_depth_file) as depth_img:
-                        depth = np.asarray(depth_img) / 256
-                        colored = colorize(depth)
-                        Image.fromarray(colored).convert("RGB").save(depth_output_file)
-                
-                with Image.open(depth_output_file) as image:
-                    self.draw_annotations(image, row)
-                    image.save(depth_output_file)
-                    seen_depth_already.append(depth_output_file)
-
-
     def draw_annotations(self, image, row):
         draw = ImageDraw.Draw(image)
                 
@@ -427,7 +443,7 @@ class DepthEstimationWorker(QRunnable):
         sample_bottom_right = (int(row['sample_x'])+radius, int(row['sample_y'])+radius)
         draw.arc((sample_top_left, sample_bottom_right), 0, 360, fill="red", width=5)
 
-        distance = round(float(row['animal_depth']), ndigits=1)
+        distance = round(float(row['animal_distance']), ndigits=1)
         text = f"{distance} m"
         
         if platform.system() == 'Darwin':       # macOS
@@ -438,5 +454,133 @@ class DepthEstimationWorker(QRunnable):
         bbox = draw.textbbox(top_left, text, font=font)
         draw.rectangle(bbox, fill="black")
         draw.text(top_left, text, fill="white", font=font)
+    
 
 
+    def run_segmentation(self, deployment, resize_factor=4, inference_files=None):
+        # returns a dictionary: key = image absolute path, value = segmentation mask absolute path
+        # if inference files is specified, will only save final output for those files
+        out_dictionary = {}
+
+        input_dir = os.path.join(self.deployments_dir, deployment)
+        output_dir = os.path.join(self.root_path, "segmentation", deployment)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        vectors = []
+        filenames = []
+        gray_image_shape = None
+
+        # Load and preprocess images
+        print("Segmentation on ", input_dir)
+        print("Preprocessing images")
+
+        for file in os.listdir(input_dir):
+            if self.stop_requested:
+                return
+            fpath = os.path.join(input_dir, file)
+            ext = os.path.splitext(file)[1].lower()
+            if os.path.isdir(file) or not(ext == ".png" or ext == ".jpg" or ext == ".jpeg"):
+                continue
+
+            filenames.append(file)
+
+            with Image.open(fpath) as image:
+                image = self.main_window.crop_manager.crop(image, deployment)
+                image = image.resize((image.width // resize_factor, image.height // resize_factor))
+
+                preprocessed_image = type2_preprocess(image) if is_night(image) else type1_preprocess(image)
+                
+                gray_image_shape = preprocessed_image.shape # store so we know how to reshape back to an image later
+                vector = np.reshape(preprocessed_image, (preprocessed_image.shape[0]*preprocessed_image.shape[1], 1))
+                vectors.append(vector)
+        
+
+        # Prep data matrix and do RPCA
+
+        print("Running RPCA")
+        M = np.hstack(vectors)
+        print(M.shape)
+        rpca = R_pca(M)
+        L, S = rpca.fit(max_iter=5, iter_print=1)
+        print("RPCA done, saving segmentation masks")
+
+
+        # post processing and save
+
+        median_footprint = np.ones((3,3))
+        morphological_footprint = disk(1)
+        os.makedirs(output_dir, exist_ok=True)
+
+        for i in range(S.shape[1]):
+            if self.stop_requested:
+                return
+            if inference_files and os.path.abspath(os.path.join(input_dir, filenames[i])) not in inference_files:
+                continue
+
+            save_filename = os.path.splitext(filenames[i])[0] + ".png"
+
+            sparse_img = np.reshape(S[:,i], gray_image_shape)
+
+            threshold = np.std(sparse_img, ddof=1)
+            thresholded = (np.multiply(sparse_img, sparse_img) > threshold) * 255
+
+            filtered = filters.median(thresholded, median_footprint)
+            filtered = opening(filtered, morphological_footprint)
+
+            binary = filtered.astype(bool)
+            save_path = os.path.join(output_dir, save_filename)
+            Image.fromarray(binary).save(save_path)
+        
+            orig_abs_path = os.path.abspath(os.path.join(input_dir, filenames[i]))
+            save_abs_path = os.path.abspath(save_path)
+            out_dictionary[orig_abs_path] = save_abs_path
+        
+        print("Segmentation done")
+        return out_dictionary
+
+
+
+# Segmentation utility functions
+
+def is_night(pil_image):
+    np_image = np.asarray(pil_image.convert("RGB"))
+    for i in range(5):
+        x = random.randint(0, np_image.shape[1]-1)
+        y = random.randint(0, np_image.shape[0]-1)
+        equal = np_image[y,x,0] == np_image[y,x,1] and np_image[y,x,1] == np_image[y,x,2]
+        if not equal:
+            return False
+    return True
+
+
+def type1_preprocess(pil_image, beta=0):
+    gray_image = np.asarray(pil_image.convert("L"))
+    equalized_image = equalize_hist(gray_image) * 255
+    equalized_image = equalized_image.astype(int)
+
+    if beta == 0:
+        return equalized_image
+
+    radius = 1
+    n_points = 8*radius
+    METHOD = "uniform"
+    lbp_img = local_binary_pattern(equalized_image, n_points, radius, METHOD)
+
+    i_star = beta*lbp_img + (1-beta)*equalized_image
+    return i_star
+
+
+def type2_preprocess(pil_image, beta=0.35):
+    gray_image = np.asarray(pil_image.convert("L"))
+    blurred_image = filters.gaussian(gray_image, sigma=0.5, preserve_range=True).astype(int)
+
+    if beta == 0:
+        return blurred_image
+
+    radius = 2
+    n_points = 8*radius
+    METHOD = "uniform"
+    lbp_img = local_binary_pattern(blurred_image, n_points, radius, METHOD)
+
+    i_star = beta*lbp_img + (1-beta)*blurred_image
+    return i_star

@@ -111,7 +111,43 @@ class CropManager:
         if deployment not in self.json_data:
             return
         
-        # TODO
+        config = self.json_data[deployment]
+        cropped_width = config["image_width"] - config["crop_left"] - config["crop_right"]
+        cropped_height = config["image_height"] - config["crop_top"] - config["crop_bottom"]
+
+        with open(megadetector_output_filepath) as json_file:
+            json_data = json.load(json_file)
+
+        for image in json_data["images"]:
+            new_detections_list = []
+            for detection in image["detections"]:
+                bbox = detection["bbox"]
+                # bbox is x, y, width, height in fractional units
+                new_bbox = [
+                    (bbox[0] * config["image_width"] - config["crop_left"]) / cropped_width,
+                    (bbox[1] * config["image_height"] - config["crop_top"]) / cropped_height,
+                    bbox[2] * config["image_width"] / cropped_width,
+                    bbox[3] * config["image_height"] / cropped_height
+                ]
+                fully_cropped_out = (new_bbox[0] > 1) or (new_bbox[0] + new_bbox[2] < 0) or (new_bbox[1] > 1) or (new_bbox[1] + new_bbox[3] < 0)
+                if not fully_cropped_out:
+                    clamped_x = max(0.0, new_bbox[0])
+                    clamped_y = max(0.0, new_bbox[1])
+                    right = new_bbox[0] + new_bbox[2]
+                    clamped_right = min(1.0, right)
+                    clamped_width = clamped_right - clamped_x
+                    bottom = new_bbox[1] + new_bbox[3]
+                    clamped_bottom = min(1.0, bottom)
+                    clamped_height = clamped_bottom - clamped_y
+                    clamped_bbox = [clamped_x, clamped_y, clamped_width, clamped_height]
+
+                    detection["bbox"] = clamped_bbox
+                    new_detections_list.append(detection)
+
+            image["detections"] = new_detections_list
+        
+        with open(megadetector_output_filepath, mode='w') as json_file:
+            json.dump(json_data, json_file, indent=1)
         
 
 

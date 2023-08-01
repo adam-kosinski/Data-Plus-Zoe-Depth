@@ -60,7 +60,7 @@ def draw_annotations(image, row):
     sample_bottom_right = (int(row['sample_x'])+radius, int(row['sample_y'])+radius)
     draw.arc((sample_top_left, sample_bottom_right), 0, 360, fill="red", width=5)
 
-    distance = round(float(row['animal_depth']), ndigits=1)
+    distance = round(float(row['animal_distance']), ndigits=1)
     text = f"{distance} m"
     font = ImageFont.truetype("arial.ttf", size=24)
     bbox = draw.textbbox(top_left, text, font=font)
