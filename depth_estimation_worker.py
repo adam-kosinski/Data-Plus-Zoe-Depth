@@ -10,6 +10,7 @@ from skimage.morphology import disk, opening
 from r_pca import R_pca
 import random
 import platform
+from datetime import datetime, timedelta
 
 from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
 from PyQt6.QtWidgets import QMessageBox
@@ -57,6 +58,9 @@ class DepthEstimationWorker(QRunnable):
         self.inference_file_dict = {}
         self.total_relative_time_estimated = 0  # initialized by summing config values - see run() function
         self.progress = 0   # 0-100
+
+        self.MEGADECTOR_CONF_THRESHOLD = 0.5
+        self.MAX_SEC_BETWEEN_SEQUENCE_IMAGES = 600
 
 
     def stop(self):
@@ -135,7 +139,7 @@ class DepthEstimationWorker(QRunnable):
             output_file = os.path.join(detections_dir, deployment + ".json")
             if not os.path.exists(output_file):
                 input_dir = os.path.join(self.deployments_dir, deployment)
-                args = ["megadetector_weights/md_v5a.0.0.pt", input_dir, output_file, "--threshold", "0.5"]
+                args = ["megadetector_weights/md_v5a.0.0.pt", input_dir, output_file, "--threshold", str(self.MEGADECTOR_CONF_THRESHOLD), "--output_relative_filenames"]
                 run_detector_batch.main(args)
 
                 # bboxes were evaluated on uncropped image, adjust for cropped image
@@ -145,7 +149,7 @@ class DepthEstimationWorker(QRunnable):
                     self.signals.message.emit("Stopped")
                     self.signals.stopped.emit()
                     return
-            
+                        
             self.increment_progress(self.n_files_in_deployment(deployment) * MEGADETECTOR_TIME_PER_IMAGE)
             print("Megadetector done with deployment", deployment)
         
@@ -162,11 +166,12 @@ class DepthEstimationWorker(QRunnable):
             self.increment_progress(ZOEDEPTH_BUILD_TIME)
 
         for deployment in self.calibration_json:
-            inference_files = self.inference_file_dict[deployment]
 
-            input_dir = os.path.join(self.deployments_dir, deployment)
             depth_maps_dir = os.path.join(self.root_path, "depth_maps", deployment)
             os.makedirs(depth_maps_dir, exist_ok=True)
+
+
+            # load megadetector results
 
             detection_json_path = os.path.join(detections_dir, deployment + ".json")
             if not os.path.exists(detection_json_path):
@@ -174,49 +179,54 @@ class DepthEstimationWorker(QRunnable):
             with open(detection_json_path) as json_file:
                 bbox_json = json.load(json_file)
 
+            detections_dict = {}
+            for image_data in bbox_json["images"]:
+                # filter just in case, category 1 is for animals
+                detections = list(filter(lambda detection: detection["category"] == "1" and
+                                         detection["conf"] >= self.MEGADECTOR_CONF_THRESHOLD,
+                                         image_data["detections"]))
+                if len(detections) > 0:
+                    detections_dict[image_data["file"]] = detections
+
+
             # get calibrated reference depth for this deployment
             calib_depth = self.get_calib_depth(deployment)
 
             
-            # segmentation
-            self.signals.message.emit(f"{deployment} - running segmentation")
-            segmentation_filepath_dict = self.run_segmentation(deployment, resize_factor=SEGMENTATION_RESIZE_FACTOR, inference_files=inference_files)
-            self.increment_progress(self.n_files_in_deployment(deployment) * SEGMENTATION_TIME_PER_IMAGE)
-            if self.stop_requested:
-                self.signals.message.emit("Stopped")
-                self.signals.stopped.emit()
-                return
-            
             
 
-            # run zoedepth
+            # organize images into sequences (using two dicts as indices to convert back and forth between sequence id and file basenames)
+            basename_to_sequence, sequence_to_basenames = self.get_segmentation_sequences(deployment)
 
-            for i, image_abs_path in enumerate(inference_files):
+            
+            # iterate through files with animals detected
+            
+            for i, (image_basename, detections) in enumerate(detections_dict.items()):
                 self.increment_progress(ZOEDEPTH_INFER_TIME_PER_IMAGE)  # do this at the beginning (instead of end) for accurate accounting, since there are so many spots with the continue keyword that skip the end
 
                 if self.stop_requested:
                     self.signals.message.emit("Stopped")
                     self.signals.stopped.emit()
                     return
-                
-                # check if an image
-                ext = os.path.splitext(image_abs_path)[1].lower()
-                if not (ext == ".jpg" or ext == ".jpeg" or ext == ".png"):
-                    continue
-                
 
-                # get detections, and skip this image if no animals detected
-                detections = []
-                for obj in bbox_json["images"]:
-                    if obj["file"] == image_abs_path:
-                        detections = list(filter(lambda detection: detection["category"] == "1", obj["detections"]))   # category animal
                 
-                if len(detections) == 0:
-                    continue
+                # segmentation
+
+                # check if the mask exists already, if not do segmentation on its sequence
+                mask_file_basename = os.path.splitext(image_basename)[0] + ".png"
+                mask_file_path = os.path.join(self.root_path, "segmentation", deployment, mask_file_basename)
+
+                if not os.path.exists(mask_file_path) and image_basename in basename_to_sequence:
+                    print("Running segmentation on", image_basename)
+                    sequence_id = basename_to_sequence[image_basename]
+                    sequence_files = sequence_to_basenames[sequence_id]
+                    files_with_animals = list(filter(lambda basename: basename in detections_dict, sequence_files))
+                    self.run_segmentation(sequence_files, deployment, resize_factor=SEGMENTATION_RESIZE_FACTOR, files_to_save=files_with_animals)
                 
-                print("Getting depth for", image_abs_path)
+                
+                print("Getting depth for", image_basename)
                 # check if depth was already calculated, if so use it and skip zoedepth calculation
-                depth_basename = os.path.splitext(os.path.basename(image_abs_path))[0] + "_raw.png"
+                depth_basename = os.path.splitext(image_basename)[0] + "_raw.png"
                 depth_path = os.path.join(depth_maps_dir, depth_basename)
                 if os.path.exists(depth_path):
                     with Image.open(depth_path) as depth_img:
@@ -234,17 +244,17 @@ class DepthEstimationWorker(QRunnable):
                             self.signals.stopped.emit()
                             return
 
-                    self.signals.message.emit(f"{deployment} - calculating depth for image {i+1}/{len(inference_files)}")
+                    self.signals.message.emit(f"{deployment} - calculating depth for image {i+1}/{len(detections_dict.keys())}")
 
-                    print("Running zoedepth on", image_abs_path)
-                    with Image.open(image_abs_path).convert("RGB") as image:
+                    print("Running zoedepth on", image_basename)
+                    with Image.open(os.path.join(self.deployments_dir, deployment, image_basename)).convert("RGB") as image:
                         cropped_image = self.main_window.crop_manager.crop(image, deployment)
                         depth = self.main_window.zoedepth_model.infer_pil(cropped_image)
-                    save_basename = os.path.splitext(os.path.basename(image_abs_path))[0] + "_raw.png"
+                    save_basename = os.path.splitext(image_basename)[0] + "_raw.png"
                     save_path = os.path.join(depth_maps_dir, save_basename)
                     save_raw_16bit(depth, save_path)
                 
-                self.signals.message.emit(f"{deployment} - calculating depth for image {i+1}/{len(inference_files)}")
+                self.signals.message.emit(f"{deployment} - calculating depth for image {i+1}/{len(detections_dict.keys())}")
                 
                 # calibrate
                 # lazy calibration
@@ -269,11 +279,14 @@ class DepthEstimationWorker(QRunnable):
                     bbox_h = int(h*b[3])
                     bbox_depth = depth[bbox_y:bbox_y+bbox_h, bbox_x:bbox_x+bbox_w]
 
-                    # get bbox segmentation mask
-                    with Image.open(segmentation_filepath_dict[image_abs_path]) as mask_img:
-                        mask_img = mask_img.resize((mask_img.width * SEGMENTATION_RESIZE_FACTOR, mask_img.height * SEGMENTATION_RESIZE_FACTOR))
-                        animal_mask_data = np.asarray(mask_img)
-                        
+
+                    # sample from segmentation mask if it exists
+                    segmentation_median_estimate = None
+                    if os.path.exists(mask_file_path):
+                        with Image.open(mask_file_path) as mask_img:
+                            mask_img = mask_img.resize((mask_img.width * SEGMENTATION_RESIZE_FACTOR, mask_img.height * SEGMENTATION_RESIZE_FACTOR))
+                            animal_mask_data = np.asarray(mask_img)
+                            
                         # animal mask data might not be the exact same shape as our depth image, since we were doing resizing
                         # fix that by cropping the animal mask data to the depth map shape (fixing if it was too big)
                         # and then pasting it onto a numpy array of zeros of the depth map shape (fixing if it was too small)
@@ -283,18 +296,17 @@ class DepthEstimationWorker(QRunnable):
 
                         bbox_animal_mask = animal_mask[bbox_y:bbox_y+bbox_h, bbox_x:bbox_x+bbox_w]
                         bbox_animal_mask = bbox_animal_mask.astype(bool)
-                        animal_mask_union[bbox_y:bbox_y+bbox_h, bbox_x:bbox_x+bbox_w] = bbox_animal_mask
-                    
+                        animal_mask_union[bbox_y:bbox_y+bbox_h, bbox_x:bbox_x+bbox_w] = bbox_animal_mask | animal_mask_union[bbox_y:bbox_y+bbox_h, bbox_x:bbox_x+bbox_w]
+
+                        segmentation_median_estimate = np.median(bbox_depth[bbox_animal_mask]) if True in bbox_animal_mask else None
+
+
                     # get depth estimate
-                    segmentation_median_estimate = np.median(bbox_depth[bbox_animal_mask]) if True in bbox_animal_mask else None
-                    percentile_estimate = np.percentile(bbox_depth, 20)
                     if segmentation_median_estimate:
                         depth_estimate = segmentation_median_estimate
-                        print("segmentation estimate")
                     else:
-                        depth_estimate = percentile_estimate
-                        print("percentile estimate")
-                    print(depth_estimate)
+                        depth_estimate = np.percentile(bbox_depth, 20)
+
 
                     # get sampled point (point with depth value = depth estimate, that's closest to bbox center)
                     if segmentation_median_estimate:
@@ -312,7 +324,7 @@ class DepthEstimationWorker(QRunnable):
                     
                     output.append({
                         "deployment": deployment,
-                        "filename": os.path.basename(image_abs_path),
+                        "filename": image_basename,
                         "animal_distance": depth_estimate,
                         "bbox_x": bbox_x,
                         "bbox_y": bbox_y,
@@ -350,14 +362,14 @@ class DepthEstimationWorker(QRunnable):
                 os.makedirs(visualization_dir, exist_ok=True)
 
                 # label RGB image, once without segmentation mask and once with it
-                with Image.open(image_abs_path) as rgb_image:
+                with Image.open(os.path.join(self.deployments_dir, deployment, image_basename)) as rgb_image:
                     cropped_rgb_image = self.main_window.crop_manager.crop(rgb_image, deployment)
                     cropped_rgb_image_segmentation = cropped_rgb_image.copy()
 
                     # normal
                     for row in output:
                         self.draw_annotations(cropped_rgb_image, row)
-                    rgb_output_file = os.path.join(visualization_dir, os.path.basename(image_abs_path))
+                    rgb_output_file = os.path.join(visualization_dir, image_basename)
                     cropped_rgb_image.save(rgb_output_file)
 
                     # with segmentation mask
@@ -365,7 +377,7 @@ class DepthEstimationWorker(QRunnable):
                     cropped_rgb_image_segmentation.paste("yellow", (0,0), animal_segmentation_mask_image)
                     for row in output:
                         self.draw_annotations(cropped_rgb_image_segmentation, row)
-                    name, ext = os.path.splitext(os.path.basename(image_abs_path))
+                    name, ext = os.path.splitext(image_basename)
                     rgb_segmentation_output_file = os.path.join(visualization_dir, name + "a_segmentation" + ext)
                     cropped_rgb_image_segmentation.save(rgb_segmentation_output_file)
                 
@@ -373,7 +385,7 @@ class DepthEstimationWorker(QRunnable):
                 depth_image = Image.fromarray(colorize(depth)).convert("RGB")
                 for row in output:
                     self.draw_annotations(depth_image, row)
-                name, ext = os.path.splitext(os.path.basename(image_abs_path))
+                name, ext = os.path.splitext(image_basename)
                 depth_output_file = os.path.join(visualization_dir, name + "b_depth" + ext)
                 depth_image.save(depth_output_file)
         
@@ -404,6 +416,41 @@ class DepthEstimationWorker(QRunnable):
         self.progress += 100 * relative_time_increment / self.total_relative_time_estimated
         self.progress = min(100, self.progress)
         self.signals.progress.emit(self.progress)
+
+
+    def get_segmentation_sequences(self, deployment):
+        basename_to_sequence = {}
+        sequence_to_basenames = {}
+        basename_date_tuples = []
+        
+        directory = os.path.join(self.deployments_dir, deployment)
+        for basename in os.listdir(directory):
+            # only jpg images have date time original info
+            if os.path.splitext(basename)[1].lower() != ".jpg":
+                continue
+            with Image.open(os.path.join(directory, basename)) as image:
+                exif = image._getexif()
+                if not exif or 36867 not in exif:
+                    continue
+                datestring = exif[36867] # "date time original" tag id
+                date = datetime.strptime(datestring, "%Y:%m:%d %H:%M:%S")
+                basename_date_tuples.append((basename, date))
+        
+        basename_date_tuples.sort(key=lambda item: item[1])
+        
+        current_sequence_id = 0
+        current_sequence_files = []
+        for i, item in enumerate(basename_date_tuples):
+            basename_to_sequence[item[0]] = current_sequence_id
+            current_sequence_files.append(item[0])
+
+            # if last item, or enough time between this one and the next, save this sequence and start a new one
+            if i+1 == len(basename_date_tuples) or basename_date_tuples[i+1][1] - item[1] > timedelta(seconds=self.MAX_SEC_BETWEEN_SEQUENCE_IMAGES):
+                sequence_to_basenames[current_sequence_id] = current_sequence_files
+                current_sequence_files = []
+                current_sequence_id += 1
+        
+        return basename_to_sequence, sequence_to_basenames
 
 
     def choose_inference_files(self, deployment):
@@ -457,34 +504,22 @@ class DepthEstimationWorker(QRunnable):
     
 
 
-    def run_segmentation(self, deployment, resize_factor=4, inference_files=None):
-        # returns a dictionary: key = image absolute path, value = segmentation mask absolute path
-        # if inference files is specified, will only save final output for those files
-        out_dictionary = {}
+    def run_segmentation(self, file_basename_list, deployment, resize_factor=4, files_to_save=None):
 
-        input_dir = os.path.join(self.deployments_dir, deployment)
         output_dir = os.path.join(self.root_path, "segmentation", deployment)
         os.makedirs(output_dir, exist_ok=True)
         
         vectors = []
-        filenames = []
         gray_image_shape = None
 
         # Load and preprocess images
-        print("Segmentation on ", input_dir)
         print("Preprocessing images")
 
-        for file in os.listdir(input_dir):
+        for basename in file_basename_list:
             if self.stop_requested:
                 return
-            fpath = os.path.join(input_dir, file)
-            ext = os.path.splitext(file)[1].lower()
-            if os.path.isdir(file) or not(ext == ".png" or ext == ".jpg" or ext == ".jpeg"):
-                continue
 
-            filenames.append(file)
-
-            with Image.open(fpath) as image:
+            with Image.open(os.path.join(self.deployments_dir, deployment, basename)) as image:
                 image = self.main_window.crop_manager.crop(image, deployment)
                 image = image.resize((image.width // resize_factor, image.height // resize_factor))
 
@@ -514,10 +549,9 @@ class DepthEstimationWorker(QRunnable):
         for i in range(S.shape[1]):
             if self.stop_requested:
                 return
-            if inference_files and os.path.abspath(os.path.join(input_dir, filenames[i])) not in inference_files:
+            if files_to_save and file_basename_list[i] not in files_to_save:
                 continue
 
-            save_filename = os.path.splitext(filenames[i])[0] + ".png"
 
             sparse_img = np.reshape(S[:,i], gray_image_shape)
 
@@ -528,15 +562,12 @@ class DepthEstimationWorker(QRunnable):
             filtered = opening(filtered, morphological_footprint)
 
             binary = filtered.astype(bool)
-            save_path = os.path.join(output_dir, save_filename)
+            save_basename = os.path.splitext(file_basename_list[i])[0] + ".png"
+            save_path = os.path.join(output_dir, save_basename)
             Image.fromarray(binary).save(save_path)
         
-            orig_abs_path = os.path.abspath(os.path.join(input_dir, filenames[i]))
-            save_abs_path = os.path.abspath(save_path)
-            out_dictionary[orig_abs_path] = save_abs_path
-        
         print("Segmentation done")
-        return out_dictionary
+
 
 
 

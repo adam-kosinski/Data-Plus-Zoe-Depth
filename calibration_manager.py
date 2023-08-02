@@ -105,6 +105,8 @@ class CalibrationManager:
         self.ref_view.setScene(self.choose_image_scene)
         self.depth_view.setScene(self.choose_image_scene)
 
+        self.zoe_worker = None
+
         # prime backgrounds for pixmaps, no idea why we need this at the beginning but it doesn't work otherwise
         self.set_background(self.ref_view, QPixmap())
         self.set_background(self.depth_view, QPixmap())
@@ -163,9 +165,13 @@ class CalibrationManager:
                 self.rel_depth = np.asarray(depth_img) / 256
             self.update_depth_display()
         else:
-            worker = ZoeWorker(self.main_window, abs_path, self.deployment)
-            worker.signals.result.connect(self.process_zoe_result)
-            self.main_window.threadpool.start(worker)
+            # if a worker is currently running, cancel its output before starting a new one
+            if self.zoe_worker:
+                self.zoe_worker.signals.result.disconnect()
+
+            self.zoe_worker = ZoeWorker(self.main_window, abs_path, self.deployment)
+            self.zoe_worker.signals.result.connect(self.process_zoe_result)
+            self.main_window.threadpool.start(self.zoe_worker)
 
     def init_calibration_reference_image(self, fpath):
         abs_fpath = os.path.join(self.root_path, fpath)
@@ -367,6 +373,10 @@ class CalibrationManager:
             button = QMessageBox.question(self.main_window, "Calibration Not Saved", "Are you sure you want to exit? The changes you made to this calibration aren't saved.")
             if button != QMessageBox.StandardButton.Yes:
                 return
+            
+        if self.zoe_worker:
+            self.zoe_worker.signals.result.disconnect()
+
         self.main_window.screens.setCurrentWidget(self.main_window.mainScreen)
         self.reset()
     
