@@ -15,12 +15,23 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton
 )
+from PyQt6.QtGui import QIcon
 from PyQt6 import uic
 
 from gui_utils import clear_layout_contents, depth_to_pixmap
 from calibration_manager import CalibrationManager
 from crop_manager import CropManager
 from depth_estimation_worker import DepthEstimationWorker
+
+
+# icon stuff for windows
+try:
+    from ctypes import windll  # Only exists on Windows.
+    # app id is company.product.subproduct.version
+    myappid = 'DataPlus.WildlifeDepthEstimation.Tool.v1.0'
+    windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+except ImportError:
+    pass
 
 
 
@@ -90,7 +101,7 @@ class MainWindow(QMainWindow):
         self.openOutputCSVButton.clicked.connect(self.open_output_csv)
 
         # temp
-        self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/full_deployment_test")
+        self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
         self.resize(QSize(800, 600))
 
 
@@ -221,6 +232,8 @@ if __name__ == '__main__':
 
     # create window
     window = MainWindow()
+    basedir = os.path.dirname(__file__)
+    window.setWindowIcon(QIcon(os.path.join(basedir, "deer.ico")))
     window.show()
 
     # allow ctrl + C to work

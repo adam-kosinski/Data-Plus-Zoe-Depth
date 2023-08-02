@@ -4,13 +4,12 @@ from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
 
-datas = [('gui.ui', '.'), ('hubconf.py', '.'), ('zoedepth/models', './zoedepth/models'), ('megadetector_weights', 'megadetector_weights')]
+datas = [('gui.ui', '.'), ('deer.ico', '.'), ('hubconf.py', '.'), ('zoedepth/models', './zoedepth/models'), ('md_v5a.0.0.onnx', '.')]
 datas += collect_data_files('timm', include_py_files=True)
-datas += collect_data_files('ultralytics')
 
 a = Analysis(
     ['gui.py'],
-    pathex=['MegaDetector', 'yolov5'],
+    pathex=[],
     binaries=[],
     datas=datas,
     hiddenimports=['timm'],
@@ -31,6 +30,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name='Wildlife Depth Estimation',
+    icon='deer.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

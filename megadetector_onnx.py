@@ -15,10 +15,11 @@ def read_as_numpy(filename):
 
 class MegaDetectorRuntime:
     def __init__(self):
-        self.inference_session = onnxruntime.InferenceSession("./md_v5a.0.0.onnx")
+        basedir = os.path.dirname(__file__)
+        self.inference_session = onnxruntime.InferenceSession(os.path.join(basedir, "./md_v5a.0.0.onnx"))
         # onnx file downloaded from here: https://github.com/timmh/MegaDetectorLite/releases/tag/v0.2
     
-    def run(self, filepath, conf_threshold=0.2):
+    def run(self, filepath, conf_threshold=0.2, categories=["1"]):
 
         numpy_image = read_as_numpy(filepath)
         n_bands, image_height, image_width = numpy_image.shape
@@ -32,7 +33,8 @@ class MegaDetectorRuntime:
             # note: md_output has float32 numbers, convert to float64 with float() to play nice with json
 
             conf = float(md_output[0][i])
-            if conf < conf_threshold:
+            category = str(md_output[1][i] + 1)
+            if conf < conf_threshold or category not in categories:
                 continue
 
             bbox_raw = md_output[2][i]
@@ -45,7 +47,7 @@ class MegaDetectorRuntime:
             bbox = list(map(lambda n: round(float(n), 4), bbox))
 
             image_results["detections"].append({
-                "category": str(md_output[1][i] + 1),
+                "category": category,
                 "conf": conf,
                 "bbox": bbox
             })

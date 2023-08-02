@@ -3,6 +3,7 @@ import os
 from PIL import Image, ImageDraw, ImageFont
 import json
 import csv
+import math
 from skimage.feature import local_binary_pattern
 from skimage.exposure import equalize_hist
 from skimage import filters
@@ -18,27 +19,25 @@ from PyQt6.QtWidgets import QMessageBox
 from zoe_worker import build_zoedepth_model
 from zoedepth.utils.misc import save_raw_16bit, colorize
 
-# megadetector stuff
-import sys
-sys.path.append("MegaDetector")
-sys.path.append("yolov5")
-import run_detector_batch
+from megadetector_onnx import MegaDetectorRuntime
 
 
 SEGMENTATION_RESIZE_FACTOR = 4
 
 # measured times in seconds used for progress bar, treat as relative though in case computer faster etc
-START_TIME = 4  # show a little bit of the progress bar right at the start to let the user know stuff is happening
-MEGADETECTOR_TIME_PER_IMAGE = 4.5
+# megadetector load time is insignificant
+MEGADETECTOR_TIME_PER_IMAGE = 0.9
 SEGMENTATION_TIME_PER_IMAGE = 2
 ZOEDEPTH_BUILD_TIME = 12
 ZOEDEPTH_INFER_TIME_PER_IMAGE = 20
 
+TYPICAL_FRACTION_OF_IMAGES_WITH_ANIMALS = 0.2   # used to estimate zoedepth runtime at the beginning before we know how many animal images
+
 
 class DepthEstimationSignals(QObject):
-    message = pyqtSignal(str)
-    warning_popup = pyqtSignal(str, str)    # title, message
+    message = pyqtSignal(str)   # displays next to the progress bar
     progress = pyqtSignal(float)  # 0-100 for progress percentage
+    warning_popup = pyqtSignal(str, str)    # title, message
     stopped = pyqtSignal()  # separate signal than done for clarity, and perhaps useful in the future
     done = pyqtSignal()
 
@@ -55,12 +54,13 @@ class DepthEstimationWorker(QRunnable):
         self.signals = DepthEstimationSignals()
         self.stop_requested = False
 
-        self.inference_file_dict = {}
         self.total_relative_time_estimated = 0  # initialized by summing config values - see run() function
         self.progress = 0   # 0-100
 
+        # config
         self.MEGADECTOR_CONF_THRESHOLD = 0.5
-        self.MAX_SEC_BETWEEN_SEQUENCE_IMAGES = 600
+        self.MEGADETECTOR_CHECKPOINT_FREQUENCY = 10 # save every 10 images
+        self.MAX_SEC_BETWEEN_SET_IMAGES = 600   # for segmentation sets
 
 
     def stop(self):
@@ -83,104 +83,74 @@ class DepthEstimationWorker(QRunnable):
             self.signals.stopped.emit()
             return
 
-        # get inference files for each deployment
-        self.signals.message.emit("Selecting images to do inference on")
-        self.inference_file_dict = {}
-        for deployment in self.calibration_json:
-            self.inference_file_dict[deployment] = self.choose_inference_files(deployment)
 
         # prep progress bar estimation
         n_images = 0
-        n_inference_images = 0
         for deployment in os.listdir(self.deployments_dir):
-            if not os.path.isdir(os.path.join(self.main_window.deployments_dir, deployment)):
+            if not os.path.isdir(os.path.join(self.deployments_dir, deployment)):
                 continue
-            n_images += self.n_files_in_deployment(deployment)
-            n_inference_images += self.n_files_in_deployment(deployment, inference_only=True)
-        self.total_relative_time_estimated = START_TIME + ZOEDEPTH_BUILD_TIME + n_images * (MEGADETECTOR_TIME_PER_IMAGE + SEGMENTATION_TIME_PER_IMAGE) + n_inference_images * ZOEDEPTH_INFER_TIME_PER_IMAGE
+            n_images += len(self.get_image_filepaths(deployment))
+        n_animal_images_guess = n_images * TYPICAL_FRACTION_OF_IMAGES_WITH_ANIMALS
+        self.total_relative_time_estimated = ZOEDEPTH_BUILD_TIME + n_images * MEGADETECTOR_TIME_PER_IMAGE + n_animal_images_guess * (SEGMENTATION_TIME_PER_IMAGE + ZOEDEPTH_INFER_TIME_PER_IMAGE)
         self.progress = 0   # 0-100
-
-        self.increment_progress(START_TIME)
-
 
 
         # check that all images are the same dimensions in each deployment
         self.signals.message.emit("Checking image dimensions")
         for deployment in self.calibration_json:
-            image_name = None
-            image_width = None
-            image_height = None
-            for file in os.listdir(os.path.join(self.deployments_dir, deployment)):
-                ext = os.path.splitext(file)[1].lower()
-                if not (ext == ".jpg" or ext == ".jpeg" or ext == ".png"):
-                    continue
-                with Image.open(os.path.join(self.deployments_dir, deployment, file)) as image:
-                    if not image_width:
-                        image_name = file
-                        image_width = image.size[0]
-                        image_height = image.size[1]
-                    elif image.size[0] != image_width or image.size[1] != image_height:
-                        self.signals.warning_popup.emit("Image Sizes Do Not Match", f"The following images in deployment '{deployment}' have different sizes:\n\n{image_name}: {image_width} x {image_height}\n{file}: {image.size[0]} x {image.size[1]}\n\nAll images in a deployment must have the same dimensions for automatic cropping and segmentation to work properly. Please correct this and then click 'Run Distance Estimation' again.")
+            first_image_filepath = None
+            first_image_width = None
+            first_image_height = None
+
+            image_filepaths = self.get_image_filepaths(deployment)
+            for filepath in image_filepaths:
+                with Image.open(filepath) as image:
+                    if not first_image_width:
+                        first_image_filepath = filepath
+                        first_image_width = image.size[0]
+                        first_image_height = image.size[1]
+                    elif image.size[0] != first_image_width or image.size[1] != first_image_height:
+                        self.signals.warning_popup.emit("Image Sizes Do Not Match", f"The following images in deployment '{deployment}' have different sizes:\n\n{first_image_filepath}: {first_image_width} x {first_image_height}\n{filepath}: {image.size[0]} x {image.size[1]}\n\nAll images in a deployment must have the same dimensions for automatic cropping and segmentation to work properly. Please correct this and then click 'Run Distance Estimation' again.")
                         self.signals.message.emit(f"Images in deployment '{deployment}' not all the same size, please fix and try running again.")
                         self.signals.stopped.emit()
                         return
 
 
 
-        # run megadetector (do all of this before zoedepth to avoid weird conflicts when building the zoe model)
 
         detections_dir = os.path.join(self.root_path, "detections")
         os.makedirs(detections_dir, exist_ok=True)
-        
-        for deployment in self.calibration_json:
-            self.signals.message.emit(f"Locating animal bounding boxes - {deployment}")
-            print(deployment)
-            
-            output_file = os.path.join(detections_dir, deployment + ".json")
-            if not os.path.exists(output_file):
-                input_dir = os.path.join(self.deployments_dir, deployment)
-                args = ["megadetector_weights/md_v5a.0.0.pt", input_dir, output_file, "--threshold", str(self.MEGADECTOR_CONF_THRESHOLD), "--output_relative_filenames"]
-                run_detector_batch.main(args)
-
-                # bboxes were evaluated on uncropped image, adjust for cropped image
-                self.main_window.crop_manager.crop_megadetector_bboxes(output_file, deployment)
-
-                if self.stop_requested:
-                    self.signals.message.emit("Stopped")
-                    self.signals.stopped.emit()
-                    return
-                        
-            self.increment_progress(self.n_files_in_deployment(deployment) * MEGADETECTOR_TIME_PER_IMAGE)
-            print("Megadetector done with deployment", deployment)
-        
-        print("Megadetector done")
-        
-
-
-
-        # do the rest of the pipeline after megadetector
-        
+  
 
         # if zoedepth was already built, reflect that in the progress bar
         if self.main_window.zoedepth_model:
             self.increment_progress(ZOEDEPTH_BUILD_TIME)
 
+        self.signals.message.emit("Loading MegaDetector v5a model")
+        megadetector_runtime = MegaDetectorRuntime()
+
+        # run the pipeline for each calibrated deployment
+
         for deployment in self.calibration_json:
-
-            depth_maps_dir = os.path.join(self.root_path, "depth_maps", deployment)
-            os.makedirs(depth_maps_dir, exist_ok=True)
+            image_filepaths = self.get_image_filepaths(deployment)
 
 
-            # load megadetector results
+            # MEGADETECTOR (ONNX version for faster inference)
 
+            # init json
             detection_json_path = os.path.join(detections_dir, deployment + ".json")
-            if not os.path.exists(detection_json_path):
-                continue
-            with open(detection_json_path) as json_file:
-                bbox_json = json.load(json_file)
+            if os.path.exists(detection_json_path):
+                with open(detection_json_path) as json_file:
+                    bbox_json = json.load(json_file)
+            else:
+                bbox_json = {"images": []}
 
+            # init detections_dict (stores positive detections only, and can lookup by filename unlike megadetector json format)
             detections_dict = {}
             for image_data in bbox_json["images"]:
+                # check if image still exists, just in case
+                if not os.path.exists(os.path.join(self.deployments_dir, deployment, image_data["file"])):
+                    continue
                 # filter just in case, category 1 is for animals
                 detections = list(filter(lambda detection: detection["category"] == "1" and
                                          detection["conf"] >= self.MEGADECTOR_CONF_THRESHOLD,
@@ -188,43 +158,92 @@ class DepthEstimationWorker(QRunnable):
                 if len(detections) > 0:
                     detections_dict[image_data["file"]] = detections
 
-
-            # get calibrated reference depth for this deployment
-            calib_depth = self.get_calib_depth(deployment)
-
-            
-            
-
-            # organize images into sequences (using two dicts as indices to convert back and forth between sequence id and file basenames)
-            basename_to_sequence, sequence_to_basenames = self.get_segmentation_sequences(deployment)
-
-            
-            # iterate through files with animals detected
-            
-            for i, (image_basename, detections) in enumerate(detections_dict.items()):
-                self.increment_progress(ZOEDEPTH_INFER_TIME_PER_IMAGE)  # do this at the beginning (instead of end) for accurate accounting, since there are so many spots with the continue keyword that skip the end
+            # run megadetector on images we haven't processed yet
+            for i, filepath in enumerate(image_filepaths):
+                self.signals.message.emit(f"{deployment} - Locating animal bounding boxes for image {i+1}/{len(image_filepaths)}")
+                self.increment_progress(MEGADETECTOR_TIME_PER_IMAGE) # do this at the top so it's consistent regardless of continue statements
 
                 if self.stop_requested:
                     self.signals.message.emit("Stopped")
                     self.signals.stopped.emit()
                     return
-
                 
+                # checkpointing
+                if i % self.MEGADETECTOR_CHECKPOINT_FREQUENCY == 0:
+                    with open(detection_json_path, mode='w') as json_file:
+                        json.dump(bbox_json, json_file, indent=1)
+                
+                # skip images we've done already
+                if os.path.basename(filepath) in map(lambda obj: obj["file"], bbox_json["images"]):
+                    continue
+
+                md_result = megadetector_runtime.run(filepath, conf_threshold=self.MEGADECTOR_CONF_THRESHOLD, categories=["1"])
+                
+                bbox_json["images"].append(md_result)
+                
+                if len(md_result["detections"]) > 0:
+                    detections_dict[md_result["file"]] = md_result["detections"]
+
+            # final save
+            with open(detection_json_path, mode='w') as json_file:
+                json.dump(bbox_json, json_file, indent=1)
+            
+            
+
+            # to prepare for segmentation, organize images into sets, the segmentation algorithm will run on one of these sets at a time
+            # (using two dicts as indices to convert back and forth between set id and file basenames)
+            # see self.get_segmentation_sets() for more details
+            basename_to_set, set_to_basenames = self.get_segmentation_sets(deployment)
+
+            # deployment-level depth prep
+            depth_maps_dir = os.path.join(self.root_path, "depth_maps", deployment)
+            os.makedirs(depth_maps_dir, exist_ok=True)
+            calib_depth = self.get_calib_depth(deployment)
+
+            
+
+            # progress bar stuff - pretend that we got our estimates right before, to make sure time adds up
+            orig_estimated_zoedepth_time = len(image_filepaths) * TYPICAL_FRACTION_OF_IMAGES_WITH_ANIMALS * ZOEDEPTH_INFER_TIME_PER_IMAGE
+            orig_estimated_segmentation_time = len(image_filepaths) * TYPICAL_FRACTION_OF_IMAGES_WITH_ANIMALS * SEGMENTATION_TIME_PER_IMAGE
+            n_images_with_animals = len(detections_dict.keys())
+            adjusted_zoedepth_time_per_animal_image = orig_estimated_zoedepth_time / n_images_with_animals
+            adjusted_segmentation_time_per_animal_image = orig_estimated_segmentation_time / n_images_with_animals
+
+            # iterate through files with animals detected
+
+            for i, (image_basename, detections) in enumerate(detections_dict.items()):
+                
+
+                if self.stop_requested:
+                    self.signals.message.emit("Stopped")
+                    self.signals.stopped.emit()
+                    return
+                
+
+
                 # segmentation
 
-                # check if the mask exists already, if not do segmentation on its sequence
+                # check if the mask exists already, if not do segmentation on its set
                 mask_file_basename = os.path.splitext(image_basename)[0] + ".png"
                 mask_file_path = os.path.join(self.root_path, "segmentation", deployment, mask_file_basename)
 
-                if not os.path.exists(mask_file_path) and image_basename in basename_to_sequence:
+                if not os.path.exists(mask_file_path) and image_basename in basename_to_set:
                     print("Running segmentation on", image_basename)
-                    sequence_id = basename_to_sequence[image_basename]
-                    sequence_files = sequence_to_basenames[sequence_id]
-                    files_with_animals = list(filter(lambda basename: basename in detections_dict, sequence_files))
-                    self.run_segmentation(sequence_files, deployment, resize_factor=SEGMENTATION_RESIZE_FACTOR, files_to_save=files_with_animals)
+                    self.signals.message.emit(f"{deployment} - running segmentation on image {i+1}/{len(detections_dict.keys())}")
+
+                    set_id = basename_to_set[image_basename]
+                    set_files = set_to_basenames[set_id]
+                    files_with_animals = list(filter(lambda basename: basename in detections_dict, set_files))
+                    self.run_segmentation(set_files, deployment, resize_factor=SEGMENTATION_RESIZE_FACTOR, files_to_save=files_with_animals)
                 
+                self.increment_progress(adjusted_segmentation_time_per_animal_image)
+
+
+
                 
                 print("Getting depth for", image_basename)
+                self.signals.message.emit(f"{deployment} - calculating depth for image {i+1}/{len(detections_dict.keys())}")    # treat everything after this point (except model building) as belonging to this message, less flickering of UI messages
+
                 # check if depth was already calculated, if so use it and skip zoedepth calculation
                 depth_basename = os.path.splitext(image_basename)[0] + "_raw.png"
                 depth_path = os.path.join(depth_maps_dir, depth_basename)
@@ -243,10 +262,10 @@ class DepthEstimationWorker(QRunnable):
                             self.signals.message.emit("Stopped")
                             self.signals.stopped.emit()
                             return
-
-                    self.signals.message.emit(f"{deployment} - calculating depth for image {i+1}/{len(detections_dict.keys())}")
+                        self.signals.message.emit(f"{deployment} - calculating depth for image {i+1}/{len(detections_dict.keys())}")
 
                     print("Running zoedepth on", image_basename)
+
                     with Image.open(os.path.join(self.deployments_dir, deployment, image_basename)).convert("RGB") as image:
                         cropped_image = self.main_window.crop_manager.crop(image, deployment)
                         depth = self.main_window.zoedepth_model.infer_pil(cropped_image)
@@ -254,12 +273,19 @@ class DepthEstimationWorker(QRunnable):
                     save_path = os.path.join(depth_maps_dir, save_basename)
                     save_raw_16bit(depth, save_path)
                 
-                self.signals.message.emit(f"{deployment} - calculating depth for image {i+1}/{len(detections_dict.keys())}")
                 
                 # calibrate
                 # lazy calibration
                 norm_depth = (depth - np.mean(depth)) / np.std(depth)
                 depth = np.maximum(0, norm_depth * np.std(calib_depth) + np.mean(calib_depth))
+
+
+                self.increment_progress(adjusted_zoedepth_time_per_animal_image)
+
+                
+
+                
+
 
                 # extract animal depths and save
                 # we could do this after processing all the files from this deployment, but one file at a time lets you see the results popping up in real time :)
@@ -308,7 +334,7 @@ class DepthEstimationWorker(QRunnable):
                         depth_estimate = np.percentile(bbox_depth, 20)
 
 
-                    # get sampled point (point with depth value = depth estimate, that's closest to bbox center)
+                    # get sampled point for visualization (point with depth value = depth estimate, that's closest to bbox center)
                     if segmentation_median_estimate:
                         value_near_estimate = bbox_depth[bbox_animal_mask][np.argmin(np.abs(bbox_depth[bbox_animal_mask] - depth_estimate))]
                     else:
@@ -399,17 +425,17 @@ class DepthEstimationWorker(QRunnable):
         self.increment_progress(self.total_relative_time_estimated)    # finish to 100%, in case accounting was a bit off
         self.signals.message.emit("Done!")
         self.signals.done.emit()
+    
 
-
-    def n_files_in_deployment(self, deployment, inference_only=False):
-        if inference_only:
-            if deployment not in self.inference_file_dict:
-                return 0
-            if not os.path.isdir(os.path.join(self.deployments_dir, deployment)):
-                return 0
-            
-            return len(self.inference_file_dict[deployment])
-        return len(os.listdir(os.path.join(self.deployments_dir, deployment)))
+    def get_image_filepaths(self, deployment):
+        # useful for filtering for images only, and counting # images
+        image_filepaths = []
+        for file in os.listdir(os.path.join(self.deployments_dir, deployment)):
+            ext = os.path.splitext(file)[1].lower()
+            if ext == ".jpg" or ext == ".jpeg" or ext == ".png":
+                filepath = os.path.join(self.deployments_dir, deployment, file)
+                image_filepaths.append(filepath)
+        return image_filepaths
 
 
     def increment_progress(self, relative_time_increment):
@@ -418,19 +444,33 @@ class DepthEstimationWorker(QRunnable):
         self.signals.progress.emit(self.progress)
 
 
-    def get_segmentation_sequences(self, deployment):
-        basename_to_sequence = {}
-        sequence_to_basenames = {}
+    def get_segmentation_sets(self, deployment):
+        # RPCA segmentation runs best on sets of images where for each image there are at least several others with a very similar background
+        # we cannot run RPCA on the whole deployment at once because that would take way too much memory
+        # so, organize deployment images into sets, where each set has a similar background
+        # images with less time than self.MAX_SEC_BETWEEN_SET_IMAGES between when they were taken go to the same set, because they're from the same burst / a close one
+        # images without JPG date-time-original metadata get sorted into sets based on whether they are a day or night image
+
+        # create two indices to convert back and forth between set ID and image filenames
+        basename_to_set = {}
+        set_to_basenames = {}
+
         basename_date_tuples = []
-        
+        basenames_without_metadata = []
         directory = os.path.join(self.deployments_dir, deployment)
-        for basename in os.listdir(directory):
+        
+        # process images with metadata first
+
+        for filepath in self.get_image_filepaths(deployment):
+            basename = os.path.basename(filepath)
             # only jpg images have date time original info
             if os.path.splitext(basename)[1].lower() != ".jpg":
+                basenames_without_metadata.append(basename)
                 continue
             with Image.open(os.path.join(directory, basename)) as image:
                 exif = image._getexif()
                 if not exif or 36867 not in exif:
+                    basenames_without_metadata.append(basename)
                     continue
                 datestring = exif[36867] # "date time original" tag id
                 date = datetime.strptime(datestring, "%Y:%m:%d %H:%M:%S")
@@ -438,34 +478,58 @@ class DepthEstimationWorker(QRunnable):
         
         basename_date_tuples.sort(key=lambda item: item[1])
         
-        current_sequence_id = 0
-        current_sequence_files = []
+        current_set_id = 0
+        current_set_files = []
         for i, item in enumerate(basename_date_tuples):
-            basename_to_sequence[item[0]] = current_sequence_id
-            current_sequence_files.append(item[0])
+            basename_to_set[item[0]] = current_set_id
+            current_set_files.append(item[0])
 
-            # if last item, or enough time between this one and the next, save this sequence and start a new one
-            if i+1 == len(basename_date_tuples) or basename_date_tuples[i+1][1] - item[1] > timedelta(seconds=self.MAX_SEC_BETWEEN_SEQUENCE_IMAGES):
-                sequence_to_basenames[current_sequence_id] = current_sequence_files
-                current_sequence_files = []
-                current_sequence_id += 1
+            # if last item, or enough time between this one and the next, save this set and start a new one
+            if i+1 == len(basename_date_tuples) or basename_date_tuples[i+1][1] - item[1] > timedelta(seconds=self.MAX_SEC_BETWEEN_SET_IMAGES):
+                set_to_basenames[current_set_id] = current_set_files
+                current_set_files = []
+                current_set_id += 1
+
+        # process images without metadata, sorting by day/night
+
+        # sort into day/night
+        day_basenames_without_metadata = []
+        night_basenames_without_metadata = []
+
+        for basename in basenames_without_metadata:
+            filepath = os.path.join(directory, basename)
+            with Image.open(filepath) as pil_image:
+                if is_night(pil_image):
+                    night_basenames_without_metadata.append(basename)
+                else:
+                    day_basenames_without_metadata.append(basename)
+
+        target_set_size = 50    # aim on the big side because these images could vary a lot
+
+        # day sets
+        if len(day_basenames_without_metadata) > 0:
+            # divide up roughly equally, trying to get close to the target set size
+            n_day_sets = math.ceil(len(day_basenames_without_metadata) / target_set_size)   # round up so we don't get zero sets
+            day_set_size = math.ceil(len(day_basenames_without_metadata) / n_day_sets)  # round up so that the last set will just be slightly small, instead of having a tiny remainder set
+            for i in range(n_day_sets):
+                this_set = day_basenames_without_metadata[i*day_set_size:(i+1)*day_set_size]
+                set_to_basenames[current_set_id] = this_set
+                for basename in this_set:
+                    basename_to_set[basename] = current_set_id
+                current_set_id += 1
         
-        return basename_to_sequence, sequence_to_basenames
-
-
-    def choose_inference_files(self, deployment):
-        # not all image files in a deployment are necessarily being used for inference
-        # some are there just to help the segmentation work better
-        # this function returns a list of absolute image paths that we want to do inference on
-        inference_files = []
-        input_dir = os.path.join(self.deployments_dir, deployment)
-        for file in os.listdir(input_dir):
-            if not os.path.isfile(os.path.join(input_dir, file)):
-                continue
-            s = os.path.splitext(file)[0]
-            if "-" not in s:
-                inference_files.append(os.path.abspath(os.path.join(input_dir, file)))
-        return inference_files
+        # night sets
+        if len(night_basenames_without_metadata) > 0:
+            n_night_sets = math.ceil(len(night_basenames_without_metadata) / target_set_size)
+            night_set_size = math.ceil(len(night_basenames_without_metadata) / n_night_sets)
+            for i in range(n_night_sets):
+                this_set = night_basenames_without_metadata[i*night_set_size:(i+1)*night_set_size]
+                set_to_basenames[current_set_id] = this_set
+                for basename in this_set:
+                    basename_to_set[basename] = current_set_id
+                current_set_id += 1
+        
+        return basename_to_set, set_to_basenames
 
 
     def get_calib_depth(self, deployment):
@@ -505,6 +569,8 @@ class DepthEstimationWorker(QRunnable):
 
 
     def run_segmentation(self, file_basename_list, deployment, resize_factor=4, files_to_save=None):
+        # resize_factor: shrink images by a factor of resize_factor
+        # files_to_save: if specified, only save these files' segmentation masks (default is to save all of them)
 
         output_dir = os.path.join(self.root_path, "segmentation", deployment)
         os.makedirs(output_dir, exist_ok=True)
@@ -551,7 +617,6 @@ class DepthEstimationWorker(QRunnable):
                 return
             if files_to_save and file_basename_list[i] not in files_to_save:
                 continue
-
 
             sparse_img = np.reshape(S[:,i], gray_image_shape)
 
