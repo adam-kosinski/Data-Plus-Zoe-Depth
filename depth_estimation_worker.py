@@ -13,8 +13,8 @@ import random
 import platform
 from datetime import datetime, timedelta
 
-from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
-from PyQt6.QtWidgets import QMessageBox
+from PyQt5.QtCore import QObject, QRunnable, pyqtSignal
+from PyQt5.QtWidgets import QMessageBox
 
 from zoe_worker import build_zoedepth_model
 from zoedepth.utils.misc import save_raw_16bit, colorize
@@ -399,7 +399,7 @@ class DepthEstimationWorker(QRunnable):
                     cropped_rgb_image.save(rgb_output_file)
 
                     # with segmentation mask
-                    animal_segmentation_mask_image = Image.fromarray(animal_mask_union * 255).convert("L")
+                    animal_segmentation_mask_image = Image.fromarray((animal_mask_union * 255).astype(np.uint8)).convert("L")
                     cropped_rgb_image_segmentation.paste("yellow", (0,0), animal_segmentation_mask_image)
                     for row in output:
                         self.draw_annotations(cropped_rgb_image_segmentation, row)

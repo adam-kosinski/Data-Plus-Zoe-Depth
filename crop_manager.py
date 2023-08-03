@@ -3,8 +3,8 @@ import json
 from PIL import Image
 import shutil
 
-from PyQt6.QtCore import Qt, QRectF
-from PyQt6.QtWidgets import (
+from PyQt5.QtCore import Qt, QRectF
+from PyQt5.QtWidgets import (
     QWidget,
     QLabel,
     QHBoxLayout,
@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QGraphicsPathItem,
     QLineEdit
 )
-from PyQt6.QtGui import QPixmap, QPen, QPainter, QDoubleValidator, QFont, QPalette, QColor, QPainterPath
+from PyQt5.QtGui import QPixmap, QPen, QPainter, QDoubleValidator, QFont, QPalette, QColor, QPainterPath
 
 
 CROP_PIXMAP_WIDTH = 700
@@ -101,6 +101,7 @@ class CropManager:
         
         width, height = pil_image.size
         if config['image_width'] != width or config['image_height'] != height:
+            print(f"Incorrect input image dimensions to CropManager.crop(), given: {width} x {height}, correct: {config['image_width']} x {config['image_height']}")
             raise Exception(f"Incorrect input image dimensions to CropManager.crop(), given: {width} x {height}, correct: {config['image_width']} x {config['image_height']}")
 
         box = (config['crop_left'], config['crop_top'], config['image_width'] - config['crop_right'], config['image_height'] - config['crop_bottom'])
@@ -180,7 +181,7 @@ class CropManager:
         if not config_json:
             open_directory = self.main_window.deployments_dir
             dialog = QFileDialog(parent=self.main_window, caption="Choose Image", directory=open_directory)
-            dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+            dialog.setFileMode(QFileDialog.ExistingFile)
             dialog.setNameFilter("*.jpg *.jpeg *.png")
             if not dialog.exec():
                 return
@@ -220,18 +221,18 @@ class CropManager:
         self.main_window.cropRightSpinBox.setValue(0)
         self.main_window.cropRightSpinBox.setEnabled(True)
 
-        resized_pixmap = pixmap.scaledToWidth(CROP_PIXMAP_WIDTH, mode=Qt.TransformationMode.SmoothTransformation)
+        resized_pixmap = pixmap.scaledToWidth(CROP_PIXMAP_WIDTH, mode=Qt.SmoothTransformation)
         self.resize_factor = CROP_PIXMAP_WIDTH / self.image_width
         
         self.scene = QGraphicsScene()
         self.view.setScene(self.scene)
-        self.scene.setSceneRect(resized_pixmap.rect().toRectF())   # will be used to limit drag range
+        self.scene.setSceneRect(QRectF(resized_pixmap.rect()))   # will be used to limit drag range
         
         background_pixmap_item = QGraphicsPixmapItem(resized_pixmap)
         background_pixmap_item.setOpacity(0.5)
         self.scene.addItem(background_pixmap_item)
 
-        self.crop_rect = CropRect(self, self.scene, resized_pixmap.rect().toRectF(), resized_pixmap)
+        self.crop_rect = CropRect(self, self.scene, QRectF(resized_pixmap.rect()), resized_pixmap)
         self.update_crop_rect()
 
         self.main_window.cropTopSpinBox.setValue(self.crop_top)
@@ -447,7 +448,7 @@ class CropHandle(QGraphicsPathItem):
         pen.setCapStyle(Qt.PenCapStyle.FlatCap)
         self.setPen(pen)
 
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)      
+        self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsMovable | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)      
         
         self.ignore_position_changes = False    # used by crop rect when it's updating the crop handle locations
 

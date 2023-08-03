@@ -1,7 +1,7 @@
 import sys
-from PyQt6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView, QGraphicsItem, QGraphicsRectItem, QGraphicsPixmapItem
-from PyQt6.QtGui import QBrush, QPen, QPainter, QPixmap, QPolygonF
-from PyQt6.QtCore import Qt, QPointF
+from PyQt5.QtWidgets import QApplication, QGraphicsScene, QGraphicsView, QGraphicsItem, QGraphicsRectItem, QGraphicsPixmapItem
+from PyQt5.QtGui import QBrush, QPen, QPainter, QPixmap, QPolygonF
+from PyQt5.QtCore import Qt, QPointF
 
 app = QApplication(sys.argv)
 

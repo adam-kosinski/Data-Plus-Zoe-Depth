@@ -2,6 +2,7 @@ import numpy as np
 import os
 import math
 from PIL import Image
+#from PIL import ImageQt
 from PIL.ImageQt import ImageQt
 import json
 
@@ -10,8 +11,8 @@ from zoedepth.utils.misc import save_raw_16bit
 from zoe_worker import ZoeWorker
 
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
+from PyQt5.QtCore import Qt, QRectF
+from PyQt5.QtWidgets import (
     QWidget,
     QLabel,
     QHBoxLayout,
@@ -24,7 +25,7 @@ from PyQt6.QtWidgets import (
     QGraphicsEllipseItem,
     QLineEdit
 )
-from PyQt6.QtGui import QPixmap, QPen, QPainter, QDoubleValidator, QFont, QPalette, QColor
+from PyQt5.QtGui import QPixmap, QPen, QPainter, QDoubleValidator, QFont, QPalette, QColor
 
 
 PIXMAP_WIDTH = 400
@@ -145,8 +146,10 @@ class CalibrationManager:
             abs_path = dialog.selectedFiles()[0]
         
         self.ref_image_path = os.path.relpath(abs_path, self.root_path)
+
         try:
             self.init_calibration_reference_image(self.ref_image_path)
+
         except:
             QMessageBox.warning(self.main_window, "Failed to Open Image", "The reference image you provided cannot be loaded, probably because its dimensions do not match the dimensions of the crop configuration image for this deployment.")
             self.ref_image_path = None
@@ -173,6 +176,7 @@ class CalibrationManager:
             self.zoe_worker.signals.result.connect(self.process_zoe_result)
             self.main_window.threadpool.start(self.zoe_worker)
 
+
     def init_calibration_reference_image(self, fpath):
         abs_fpath = os.path.join(self.root_path, fpath)
 
@@ -183,6 +187,7 @@ class CalibrationManager:
 
         self.ref_pixmap = QPixmap.fromImage(ImageQt(cropped_pil_image))
         self.ref_pixmap = self.ref_pixmap.scaledToWidth(400, mode=Qt.TransformationMode.SmoothTransformation)
+        
         self.set_background(self.ref_view, self.ref_pixmap)
         
         # sizing
@@ -190,7 +195,7 @@ class CalibrationManager:
         self.depth_view.setMinimumSize(self.ref_pixmap.width(), self.ref_pixmap.height())
 
         # update scenes
-        self.scene.setSceneRect(self.ref_pixmap.rect().toRectF())   # limits point drag range
+        self.scene.setSceneRect(QRectF(self.ref_pixmap.rect()))   # limits point drag range
         self.ref_view.setScene(self.scene)
     
     def process_zoe_result(self, depth, abs_fpath):
@@ -305,7 +310,7 @@ class CalibrationManager:
             box.hide()
             return
         
-        coords = self.depth_view.mapToScene(e.position().toPoint())
+        coords = self.depth_view.mapToScene(e.pos())
         
         aspect_ratio = self.rel_depth.shape[1] / self.rel_depth.shape[0]
         x = math.floor(self.rel_depth.shape[1] * coords.x() / PIXMAP_WIDTH)
@@ -317,7 +322,7 @@ class CalibrationManager:
         depth_val = round(10 * depth_val) / 10
         
         box.show()
-        dest = box.parentWidget().mapFromGlobal(e.globalPosition())
+        dest = box.parentWidget().mapFromGlobal(e.globalPos())
         box.move(int(dest.x()) + 20, int(dest.y()) + 10)
         self.depth_tooltip_label.setText(f"{depth_val} m ")
         box.parentWidget().update() # needed to prevent visual artifacts
@@ -412,7 +417,7 @@ class CalibrationEntry:
         # point
         self.point = Point(-5, -5, 10, 10)   # scene coords, -5 offset so center is at item coords 0,0
         self.point.setPos(x, y)
-        self.point.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
+        self.point.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsMovable | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
         self.point.mousePressEvent = lambda e: self.focus()
         scene.addItem(self.point)
 

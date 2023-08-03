@@ -5,7 +5,7 @@ from PIL import Image
 from zoedepth.utils.config import get_config
 from zoedepth.models.builder import build_model
 
-from PyQt6.QtCore import QRunnable, QObject, pyqtSignal, QThreadPool
+from PyQt5.QtCore import QRunnable, QObject, pyqtSignal, QThreadPool
 
 
 

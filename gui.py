@@ -5,8 +5,8 @@ from PIL import Image
 import subprocess
 import platform
 
-from PyQt6.QtCore import QSize, Qt, QRunnable, QThreadPool, pyqtSignal, QThread, QObject
-from PyQt6.QtWidgets import (
+from PyQt5.QtCore import QSize, Qt, QRunnable, QThreadPool, pyqtSignal, QThread, QObject
+from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
     QHBoxLayout,
@@ -15,8 +15,11 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton
 )
-from PyQt6.QtGui import QIcon
-from PyQt6 import uic
+
+from PyQt5.QtGui import QIcon
+
+from PyQt5 import uic
+
 
 from gui_utils import clear_layout_contents, depth_to_pixmap
 from calibration_manager import CalibrationManager
@@ -101,7 +104,8 @@ class MainWindow(QMainWindow):
         self.openOutputCSVButton.clicked.connect(self.open_output_csv)
 
         # temp
-        self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
+
+        self.open_root_folder("/Users/eny/Desktop/bigger_test")
         self.resize(QSize(800, 600))
 
 

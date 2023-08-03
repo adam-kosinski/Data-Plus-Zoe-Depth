@@ -4,13 +4,13 @@ from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
 
-datas = [('gui.ui', '.'), ('deer.ico', '.'), ('hubconf.py', '.'), ('zoedepth/models', './zoedepth/models'), ('md_v5a.0.0.onnx', '.')]
+datas = [('gui.ui', '.'), ('hubconf.py', '.'), ('zoedepth/models', './zoedepth/models'),('md_v5a.0.0.onnx','.')]
 datas += collect_data_files('timm', include_py_files=True)
 
 a = Analysis(
     ['gui.py'],
     pathex=[],
-    binaries=[],
+    binaries=[('/Users/eny/dataplus/zoe_env/lib/python3.9/site-packages/torch/lib/libtorch_global_deps.dylib', 'torch/lib')],
     datas=datas,
     hiddenimports=['timm'],
     hookspath=[],
@@ -22,6 +22,7 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
@@ -30,8 +31,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name='Wildlife Depth Estimation',
-    icon='deer.ico',
-    debug=False,
+    debug=True,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
@@ -52,3 +52,4 @@ coll = COLLECT(
     upx_exclude=[],
     name='Wildlife Depth Estimation',
 )
+
