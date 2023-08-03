@@ -78,11 +78,13 @@ except ImportError:
 
 class MainWindow(QMainWindow):
     def __init__(self):
+
         super().__init__()
         ui_path = os.path.join(os.path.dirname(__file__), "gui.ui")
         uic.loadUi(ui_path, self)
         self.stopButton.hide()
         self.openOutputCSVButton.hide()
+        self.openOutputVisualizationButton.hide()
         self.set_progress_message("")   # done here so in Qt Designer the label would still be visible
 
         self.root_path = None
@@ -101,7 +103,8 @@ class MainWindow(QMainWindow):
         # event listeners
         self.openRootFolder.clicked.connect(self.open_root_folder)
         self.runButton.clicked.connect(self.run_depth_estimation)
-        self.openOutputCSVButton.clicked.connect(self.open_output_csv)
+        self.openOutputCSVButton.clicked.connect(lambda: self.system_open(os.path.join(self.root_path, "output.csv")))
+        self.openOutputVisualizationButton.clicked.connect(lambda: self.system_open(os.path.join(self.root_path, "output_visualization")))
 
         # temp
         # self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
@@ -124,10 +127,16 @@ class MainWindow(QMainWindow):
             
             self.root_path = dialog.selectedFiles()[0]
 
+            self.stopButton.hide()
+            self.openOutputCSVButton.hide()
+            self.openOutputVisualizationButton.hide()
+            self.set_progress_message("")
+
         self.root_path = os.path.normpath(self.root_path)    # normpath to keep slashses standardized, in case that matters
         self.deployments_dir = os.path.join(self.root_path, "deployments")
         self.rootFolderLabel.setText(self.root_path)
 
+        print("root", self.root_path)
         self.calibration_manager.update_root_path()
         self.crop_manager.update_root_path()
 
@@ -170,6 +179,7 @@ class MainWindow(QMainWindow):
         self.setAllButtonsEnabled(False)
         self.stopButton.show()
         self.openOutputCSVButton.hide()
+        self.openOutputVisualizationButton.hide()
 
         # reset rows so we don't get duplicates
         self.csv_output_rows = []
@@ -208,14 +218,14 @@ class MainWindow(QMainWindow):
         self.setAllButtonsEnabled(True)
         self.stopButton.hide()
         self.openOutputCSVButton.show()
+        if os.path.exists(os.path.join(self.root_path, "output_visualization")):
+            self.openOutputVisualizationButton.show()
     
-    def open_output_csv(self):
-        # cross-platform solution from here: https://stackoverflow.com/questions/434597/open-document-with-default-os-application-in-python-both-in-windows-and-mac-os
-        filepath = os.path.join(self.root_path, "output.csv")
+    def system_open(self, filepath):
         if not os.path.exists(filepath):
-            QMessageBox.warning(self, "No Output", "The output file does not exist. This is probably because no output was written (likely no animals were detected).")
             return
         
+        # cross-platform solution from here: https://stackoverflow.com/questions/434597/open-document-with-default-os-application-in-python-both-in-windows-and-mac-os
         if platform.system() == 'Darwin':       # macOS
             subprocess.call(('open', filepath))
         elif platform.system() == 'Windows':    # Windows

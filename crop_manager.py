@@ -1,25 +1,18 @@
 import os
 import json
-from PIL import Image
 import shutil
 
 from PyQt5.QtCore import Qt, QRectF
 from PyQt5.QtWidgets import (
-    QWidget,
-    QLabel,
-    QHBoxLayout,
     QFileDialog,
     QMessageBox,
-    QPushButton,
     QGraphicsScene,
-    QGraphicsView,
     QGraphicsItem,
     QGraphicsPixmapItem,
     QGraphicsRectItem,
-    QGraphicsPathItem,
-    QLineEdit
+    QGraphicsPathItem
 )
-from PyQt5.QtGui import QPixmap, QPen, QPainter, QDoubleValidator, QFont, QPalette, QColor, QPainterPath
+from PyQt5.QtGui import QPixmap, QPen, QPainterPath
 
 
 CROP_PIXMAP_WIDTH = 700
@@ -28,9 +21,10 @@ CROP_HANDLE_WIDTH = 4
 MIN_CROP_RECT_WIDTH = CROP_HANDLE_SIZE * 3 + 10
 MIN_CROP_RECT_HEIGHT = CROP_HANDLE_SIZE * 3 + 10
 
-# if you ever add support for multiple deployments, make sure to update CropManger.open_image() and CropManager.save()
-# and also the end if CropManager.__init__(), which checks for existing config
-
+# if you ever add support for multiple deployments, make sure to update:
+#   CropManger.open_image()
+#   CropManager.save()
+#   CropManager.load_config_if_it_exists()
 
 
 
@@ -159,6 +153,7 @@ class CropManager:
 
     def load_config_if_it_exists(self):
         if self.config_filepath and os.path.exists(self.config_filepath):
+            # since all deployments are treated the same in this version, just open the config for the first one
             with open(self.config_filepath) as json_file:
                 self.json_data = json.load(json_file)
                 first_deployment = list(self.json_data.keys())[0]
@@ -185,7 +180,7 @@ class CropManager:
             dialog.setNameFilter("*.jpg *.jpeg *.png")
             if not dialog.exec():
                 return
-            self.crop_image_relpath = os.path.relpath(dialog.selectedFiles()[0], self.main_window.root_path)
+            self.crop_image_relpath = os.path.relpath(dialog.selectedFiles()[0], self.root_path)
             self.crop_top = 0
             self.crop_bottom = 0
             self.crop_left = 0
@@ -201,7 +196,8 @@ class CropManager:
             self.crop_right = config_json["crop_right"]
             self.crop_image_relpath = config_json["crop_image_relpath"]
 
-        crop_image_abspath = os.path.join(self.main_window.root_path, self.crop_image_relpath)
+        crop_image_abspath = os.path.join(self.root_path, self.crop_image_relpath)
+        print(crop_image_abspath)
         pixmap = QPixmap(crop_image_abspath)
         self.image_width = pixmap.width()
         self.image_height = pixmap.height()
