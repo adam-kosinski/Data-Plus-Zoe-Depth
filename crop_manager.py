@@ -293,13 +293,12 @@ class CropManager:
         # check if we need to delete anything from the old crop config
         # if change this to deployment-specific in the future, only delete a certain deployment's data
         calibration_dir = os.path.join(self.root_path, "calibration")
-        calibration_file = os.path.join(calibration_dir, "calibrations.json")
         detection_dir = os.path.join(self.root_path, "detections")
         segmentation_dir = os.path.join(self.root_path, "segmentation")
         depth_dir = os.path.join(self.root_path, "depth_maps")
         output_visualization_dir = os.path.join(self.root_path, "output_visualization")
 
-        prev_crop_config_data_exists = os.path.exists(calibration_file) or os.path.exists(detection_dir) or os.path.exists(segmentation_dir) or os.path.exists(depth_dir) or os.path.exists(output_visualization_dir)
+        prev_crop_config_data_exists = len(os.listdir(calibration_dir)) > 0 or os.path.exists(detection_dir) or os.path.exists(segmentation_dir) or os.path.exists(depth_dir) or os.path.exists(output_visualization_dir)
 
         if prev_crop_config_data_exists:
             yes_no_buttons = QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No

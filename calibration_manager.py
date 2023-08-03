@@ -2,7 +2,6 @@ import numpy as np
 import os
 import math
 from PIL import Image
-#from PIL import ImageQt
 from PIL.ImageQt import ImageQt
 import json
 
@@ -146,7 +145,6 @@ class CalibrationManager:
             abs_path = dialog.selectedFiles()[0]
         
         self.ref_image_path = os.path.relpath(abs_path, self.root_path)
-
         try:
             self.init_calibration_reference_image(self.ref_image_path)
 

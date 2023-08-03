@@ -104,8 +104,7 @@ class MainWindow(QMainWindow):
         self.openOutputCSVButton.clicked.connect(self.open_output_csv)
 
         # temp
-
-        self.open_root_folder("/Users/eny/Desktop/bigger_test")
+        # self.open_root_folder("C:/Users/AdamK/Documents/ZoeDepth/bigger_test")
         self.resize(QSize(800, 600))
 
 
