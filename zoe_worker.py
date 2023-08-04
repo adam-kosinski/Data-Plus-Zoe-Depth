@@ -10,7 +10,7 @@ from PyQt5.QtCore import QRunnable, QObject, pyqtSignal
 
 def build_zoedepth_model():
     weights_file = os.path.join(os.path.dirname(__file__), "ZoeD_M12_NK.pt")
-    overwrite = {"pretrained_resource": weights_file}
+    overwrite = {"pretrained_resource": "local::" + weights_file}
     config = get_config("zoedepth_nk", "infer", None, **overwrite)
     model_zoe_nk = build_model(config)
     
