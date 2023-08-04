@@ -58,7 +58,7 @@ class CalibrationManager:
 
         # depth view hover tooltip - doing this in code, b/c couldn't figure out how to do it in the UI without adding it to a layout
         self.depth_tooltip_box = QWidget()
-        self.depth_tooltip_box.setFixedSize(40, 20)
+        self.depth_tooltip_box.setFixedSize(55, 20)
         self.depth_tooltip_box.setAutoFillBackground(True)
         palette = main_window.palette()
         palette.setColor(QPalette.ColorRole.Window, QColor("white"))
@@ -66,7 +66,7 @@ class CalibrationManager:
         self.depth_tooltip_box.hide()
 
         self.depth_tooltip_label = QLabel()
-        self.depth_tooltip_label.setFixedSize(40, 20)
+        self.depth_tooltip_label.setFixedSize(55, 20)
 
         self.depth_tooltip_label.setParent(self.depth_tooltip_box)
         self.depth_tooltip_box.setParent(self.main_window.calibrationScreen)
