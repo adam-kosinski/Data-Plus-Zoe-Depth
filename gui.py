@@ -244,8 +244,8 @@ if __name__ == '__main__':
     app = QApplication([]) # replace [] with sys.argv if want to use command line args
 
     # create window
-    # window = MainWindow()
-    window = QMainWindow()
+    window = MainWindow()
+    # window = QMainWindow()
     basedir = os.path.dirname(__file__)
     window.setWindowIcon(QIcon(os.path.join(basedir, "deer.ico")))
     window.show()
