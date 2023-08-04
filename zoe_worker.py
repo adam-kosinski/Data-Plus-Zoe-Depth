@@ -1,17 +1,18 @@
 import torch
-import numpy as np
 import os
 from PIL import Image
 from zoedepth.utils.config import get_config
 from zoedepth.models.builder import build_model
 
-from PyQt5.QtCore import QRunnable, QObject, pyqtSignal, QThreadPool
+from PyQt5.QtCore import QRunnable, QObject, pyqtSignal
 
 
 
 def build_zoedepth_model():
-    model_zoe_nk = torch.hub.load(os.path.dirname(__file__), "ZoeD_NK", source="local", pretrained=True, config_mode="eval")
-    # first arg is repository root, which because of copying datas in the spec file will be the folder where the executable runs
+    weights_file = os.path.join(os.path.dirname(__file__), "ZoeD_M12_NK.pt")
+    overwrite = {"pretrained_resource": weights_file}
+    config = get_config("zoedepth_nk", "infer", None, **overwrite)
+    model_zoe_nk = build_model(config)
     
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     zoe = model_zoe_nk.to(DEVICE)

@@ -3,6 +3,7 @@ from PyQt5.QtWidgets import QApplication, QGraphicsScene, QGraphicsView, QGraphi
 from PyQt5.QtGui import QBrush, QPen, QPainter, QPixmap, QPolygonF
 from PyQt5.QtCore import Qt, QPointF
 
+
 app = QApplication(sys.argv)
 
 # scene 400x200, origin at 0,0

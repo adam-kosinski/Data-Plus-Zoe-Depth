@@ -473,7 +473,7 @@ class DepthEstimationWorker(QRunnable):
                     basenames_without_metadata.append(basename)
                     continue
                 datestring = exif[36867] # "date time original" tag id
-                date = datetime.strptime(datestring, "%Y:%m:%d %H:%M:%S")
+                date = datetime.strptime(datestring, "%Y:%m:%d %H:%M:%S")   # this format is standardized by the exif specification
                 basename_date_tuples.append((basename, date))
         
         basename_date_tuples.sort(key=lambda item: item[1])

@@ -156,8 +156,19 @@ class CropManager:
             # since all deployments are treated the same in this version, just open the config for the first one
             with open(self.config_filepath) as json_file:
                 self.json_data = json.load(json_file)
-                first_deployment = list(self.json_data.keys())[0]
+            
+            # filter deployments to make sure the files are still there
+            filtered_json = {}
+            for deployment in self.json_data:
+                relpath = self.json_data[deployment]["crop_image_relpath"]
+                if os.path.exists(os.path.join(self.root_path, relpath)):
+                    filtered_json[deployment] = self.json_data[deployment]
+            self.json_data = filtered_json
 
+            if len(self.json_data.keys()) == 0:
+                return
+
+            first_deployment = list(self.json_data.keys())[0]
             self.open_image(self.json_data[first_deployment])
 
 
