@@ -38,35 +38,35 @@ except ImportError:
 
 
 
-TODO
+# TODO
 
-if we update megadetector to only use inference images, update the total relative time calculation for the progress bar to reflect this
+# if we update megadetector to only use inference images, update the total relative time calculation for the progress bar to reflect this
 
-automatic cropping
+# automatic cropping
 
-if implement localized method, make sure it supports any image size (padding shouldn't be fixed)
+# if implement localized method, make sure it supports any image size (padding shouldn't be fixed)
 
-bundle the zoedepth weights with the build, instead of downloading from the internet, to remove dependence on the internet download
+# bundle the zoedepth weights with the build, instead of downloading from the internet, to remove dependence on the internet download
 
-estimated time remaining? can get a sense of how fast the person's computer is after we've done either megadetector or zoedepth once, and then use relative times to extrapolate?
+# estimated time remaining? can get a sense of how fast the person's computer is after we've done either megadetector or zoedepth once, and then use relative times to extrapolate?
 
-if someone picks a calibration image and then picks a different one, both depth callbacks will occur, but I'm not sure the order is guaranteed
-- would be nice of having a way to cancel a job. Perhaps using processes works better
-- or just disconnect the result signal, zoedepth will finish but won't do anything with its output
+# if someone picks a calibration image and then picks a different one, both depth callbacks will occur, but I'm not sure the order is guaranteed
+# - would be nice of having a way to cancel a job. Perhaps using processes works better
+# - or just disconnect the result signal, zoedepth will finish but won't do anything with its output
 
-zoedepth calibration image computation slow? I wonder if you can pick default calibration images (e.g. first image in deployment) ahead of time and start processing in the background
-or - should be able to save a calibration without depth computed yet, and have the depth + linear regression finishing computing in a thread somewhere
+# zoedepth calibration image computation slow? I wonder if you can pick default calibration images (e.g. first image in deployment) ahead of time and start processing in the background
+# or - should be able to save a calibration without depth computed yet, and have the depth + linear regression finishing computing in a thread somewhere
 
-note that there is a GUI lag spike when the model is loaded
+# note that there is a GUI lag spike when the model is loaded
 
-graphics view sizing (ideally allow the images to get bigger if they're able)
-this involves changing the x,y coords in calibrations.json to fractional units of total width/height
+# graphics view sizing (ideally allow the images to get bigger if they're able)
+# this involves changing the x,y coords in calibrations.json to fractional units of total width/height
 
-Calibration "save and next" button or something like that? For faster workflow
+# Calibration "save and next" button or something like that? For faster workflow
 
-Perhaps for more flexible calibration in the future, add an option to draw a box around parts of the image that aren't part of the environment
-for instance, people holding a sign, or animals
-And it could potentially be nice to be able to use multiple images? If the researcher used the take-pics-of-person-at-distance method
+# Perhaps for more flexible calibration in the future, add an option to draw a box around parts of the image that aren't part of the environment
+# for instance, people holding a sign, or animals
+# And it could potentially be nice to be able to use multiple images? If the researcher used the take-pics-of-person-at-distance method
 
 
 
