@@ -5,8 +5,8 @@ from PIL import Image
 import subprocess
 import platform
 
-from PyQt5.QtCore import QSize, Qt, QRunnable, QThreadPool, pyqtSignal, QThread, QObject
-from PyQt5.QtWidgets import (
+from PyQt6.QtCore import QSize, Qt, QRunnable, QThreadPool, pyqtSignal, QThread, QObject
+from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
     QHBoxLayout,
@@ -16,9 +16,9 @@ from PyQt5.QtWidgets import (
     QPushButton
 )
 
-from PyQt5.QtGui import QIcon
+from PyQt6.QtGui import QIcon
 
-from PyQt5 import uic
+from PyQt6 import uic
 
 
 from gui_utils import clear_layout_contents, depth_to_pixmap

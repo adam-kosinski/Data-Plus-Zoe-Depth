@@ -2,8 +2,8 @@ import os
 import json
 import shutil
 
-from PyQt5.QtCore import Qt, QRectF
-from PyQt5.QtWidgets import (
+from PyQt6.QtCore import Qt, QRectF
+from PyQt6.QtWidgets import (
     QFileDialog,
     QMessageBox,
     QGraphicsScene,
@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (
     QGraphicsRectItem,
     QGraphicsPathItem
 )
-from PyQt5.QtGui import QPixmap, QPen, QPainterPath
+from PyQt6.QtGui import QPixmap, QPen, QPainterPath
 
 
 CROP_PIXMAP_WIDTH = 700
@@ -187,7 +187,7 @@ class CropManager:
         if not config_json:
             open_directory = self.main_window.deployments_dir
             dialog = QFileDialog(parent=self.main_window, caption="Choose Image", directory=open_directory)
-            dialog.setFileMode(QFileDialog.ExistingFile)
+            dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
             dialog.setNameFilter("*.jpg *.jpeg *.png")
             if not dialog.exec():
                 return
@@ -228,7 +228,7 @@ class CropManager:
         self.main_window.cropRightSpinBox.setValue(0)
         self.main_window.cropRightSpinBox.setEnabled(True)
 
-        resized_pixmap = pixmap.scaledToWidth(CROP_PIXMAP_WIDTH, mode=Qt.SmoothTransformation)
+        resized_pixmap = pixmap.scaledToWidth(CROP_PIXMAP_WIDTH, mode=Qt.TransformationMode.SmoothTransformation)
         self.resize_factor = CROP_PIXMAP_WIDTH / self.image_width
         
         self.scene = QGraphicsScene()

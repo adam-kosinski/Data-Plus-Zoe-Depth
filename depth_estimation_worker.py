@@ -13,8 +13,8 @@ import random
 import platform
 from datetime import datetime, timedelta
 
-from PyQt5.QtCore import QObject, QRunnable, pyqtSignal
-from PyQt5.QtWidgets import QMessageBox
+from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
+from PyQt6.QtWidgets import QMessageBox
 
 from zoe_worker import build_zoedepth_model
 from zoedepth.utils.misc import save_raw_16bit, colorize

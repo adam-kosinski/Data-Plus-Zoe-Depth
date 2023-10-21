@@ -10,8 +10,8 @@ from zoedepth.utils.misc import save_raw_16bit
 from zoe_worker import ZoeWorker
 
 
-from PyQt5.QtCore import Qt, QRectF
-from PyQt5.QtWidgets import (
+from PyQt6.QtCore import Qt, QRectF
+from PyQt6.QtWidgets import (
     QWidget,
     QLabel,
     QHBoxLayout,
@@ -24,7 +24,7 @@ from PyQt5.QtWidgets import (
     QGraphicsEllipseItem,
     QLineEdit
 )
-from PyQt5.QtGui import QPixmap, QPen, QPainter, QDoubleValidator, QFont, QPalette, QColor
+from PyQt6.QtGui import QPixmap, QPen, QPainter, QDoubleValidator, QFont, QPalette, QColor
 
 
 PIXMAP_WIDTH = 400
@@ -308,7 +308,7 @@ class CalibrationManager:
             box.hide()
             return
         
-        coords = self.depth_view.mapToScene(e.pos())
+        coords = self.depth_view.mapToScene(e.position().toPoint())
         
         aspect_ratio = self.rel_depth.shape[1] / self.rel_depth.shape[0]
         x = math.floor(self.rel_depth.shape[1] * coords.x() / PIXMAP_WIDTH)
@@ -320,7 +320,7 @@ class CalibrationManager:
         depth_val = round(10 * depth_val) / 10
         
         box.show()
-        dest = box.parentWidget().mapFromGlobal(e.globalPos())
+        dest = box.parentWidget().mapFromGlobal(e.globalPosition())
         box.move(int(dest.x()) + 20, int(dest.y()) + 10)
         self.depth_tooltip_label.setText(f"{depth_val} m ")
         box.parentWidget().update() # needed to prevent visual artifacts

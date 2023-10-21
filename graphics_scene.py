@@ -2,6 +2,7 @@ import sys
 from PyQt5.QtWidgets import QApplication, QGraphicsScene, QGraphicsView, QGraphicsItem, QGraphicsRectItem, QGraphicsPixmapItem
 from PyQt5.QtGui import QBrush, QPen, QPainter, QPixmap, QPolygonF
 from PyQt5.QtCore import Qt, QPointF
+import torch
 
 
 app = QApplication(sys.argv)

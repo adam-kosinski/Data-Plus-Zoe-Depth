@@ -1,10 +1,10 @@
 import numpy as np
-import PyQt5.QtGui
+import PyQt6.QtGui
 
 from zoedepth.utils.misc import colorize
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPixmap, QImage
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap, QImage
 from PIL import Image
 from PIL.ImageQt import ImageQt
 
