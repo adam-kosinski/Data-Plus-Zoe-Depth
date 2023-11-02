@@ -5,7 +5,7 @@ matplotlib==3.6.2
 scipy==1.10.0
 h5py==3.7.0
 opencv-python==4.6.0.66
-PyQt5==5.15.9
+PyQt6==6.5.3
 pyinstaller==5.13.0
 scikit-image==0.21.0
 onnxruntime==1.15.0
