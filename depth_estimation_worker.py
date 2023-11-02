@@ -334,6 +334,7 @@ class DepthEstimationWorker(QRunnable):
                         depth_estimate = np.percentile(bbox_depth, 20)
 
 
+
                     # get sampled point for visualization (point with depth value = depth estimate, that's closest to bbox center)
                     if segmentation_median_estimate:
                         value_near_estimate = bbox_depth[bbox_animal_mask][np.argmin(np.abs(bbox_depth[bbox_animal_mask] - depth_estimate))]
