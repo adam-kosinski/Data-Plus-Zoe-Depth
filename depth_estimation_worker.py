@@ -12,6 +12,7 @@ from r_pca import R_pca
 import random
 import platform
 from datetime import datetime, timedelta
+import imagesize
 
 from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
 from PyQt6.QtWidgets import QMessageBox
@@ -95,32 +96,47 @@ class DepthEstimationWorker(QRunnable):
         self.progress = 0   # 0-100
 
 
+
+
         # check that all images are the same dimensions in each deployment
-        self.signals.message.emit("Checking image dimensions")
-        for deployment in self.calibration_json:
+        # doing this also tests whether we can open the images (in case of corruption etc.)
+
+        for i, deployment in enumerate(self.calibration_json):
+            if self.stop_requested:
+                self.signals.message.emit("Stopped")
+                self.signals.stopped.emit()
+                return
+            
+            self.signals.message.emit(f"Checking image dimensions, deployment {i+1}/{len(self.calibration_json)}: {deployment}")
             first_image_filepath = None
             first_image_width = None
             first_image_height = None
 
             image_filepaths = self.get_image_filepaths(deployment)
+
             for filepath in image_filepaths:
-                with Image.open(filepath) as image:
-                    if not first_image_width:
-                        first_image_filepath = filepath
-                        first_image_width = image.size[0]
-                        first_image_height = image.size[1]
-                    elif image.size[0] != first_image_width or image.size[1] != first_image_height:
-                        self.signals.warning_popup.emit("Image Sizes Do Not Match", f"The following images in deployment '{deployment}' have different sizes:\n\n{first_image_filepath}: {first_image_width} x {first_image_height}\n{filepath}: {image.size[0]} x {image.size[1]}\n\nAll images in a deployment must have the same dimensions for automatic cropping and segmentation to work properly. Please correct this and then click 'Run Distance Estimation' again.")
-                        self.signals.message.emit(f"Images in deployment '{deployment}' not all the same size, please fix and try running again.")
-                        self.signals.stopped.emit()
-                        return
+                try:
+                    width, height = imagesize.get(filepath)
+                    if width == -1 or height == -1:
+                        raise Exception("Image dimensions failed to be read") # really just to trigger the except block below
+                except:
+                    self.signals.warning_popup.emit("Failed to Read Image", f"Failed to read the image:\n{filepath}\n\nPlease remove this file or fix issues with it, and then click 'Run Depth Estimation' again.")
+                    self.signals.message.emit(f"Failed to read {filepath}, please fix or remove the file and try running again.")
+                    self.signals.stopped.emit()
+                    return
+
+                if not first_image_width:
+                    first_image_filepath = filepath
+                    first_image_width = width
+                    first_image_height = height
+                elif width != first_image_width or height != first_image_height:
+                    self.signals.warning_popup.emit("Image Sizes Do Not Match", f"The following images in deployment '{deployment}' have different sizes:\n\n{first_image_filepath}: {first_image_width} x {first_image_height}\n{filepath}: {width} x {height}\n\nAll images in a deployment must have the same dimensions for automatic cropping and segmentation to work properly. Please correct this and then click 'Run Distance Estimation' again.")
+                    self.signals.message.emit(f"Images in deployment '{deployment}' not all the same size, please fix and try running again.")
+                    self.signals.stopped.emit()
+                    return
 
 
 
-
-        detections_dir = os.path.join(self.root_path, "detections")
-        os.makedirs(detections_dir, exist_ok=True)
-  
 
         # if zoedepth was already built, reflect that in the progress bar
         if self.main_window.zoedepth_model:
@@ -129,7 +145,13 @@ class DepthEstimationWorker(QRunnable):
         self.signals.message.emit("Loading MegaDetector v5a model")
         megadetector_runtime = MegaDetectorRuntime()
 
-        # run the pipeline for each calibrated deployment
+
+
+
+        # run the pipeline for each calibrated deployment ===================================================
+
+        detections_dir = os.path.join(self.root_path, "detections")
+        os.makedirs(detections_dir, exist_ok=True)
 
         for deployment in self.calibration_json:
             image_filepaths = self.get_image_filepaths(deployment)
@@ -193,6 +215,7 @@ class DepthEstimationWorker(QRunnable):
             # to prepare for segmentation, organize images into sets, the segmentation algorithm will run on one of these sets at a time
             # (using two dicts as indices to convert back and forth between set id and file basenames)
             # see self.get_segmentation_sets() for more details
+            self.signals.message.emit(f"{deployment} - finding sets of similar images by date/time taken (for segmentation)")
             basename_to_set, set_to_basenames = self.get_segmentation_sets(deployment)
 
             # deployment-level depth prep
@@ -429,6 +452,7 @@ class DepthEstimationWorker(QRunnable):
     
 
     def get_image_filepaths(self, deployment):
+        # returns absolute paths of image files in a deployment
         # useful for filtering for images only, and counting # images
         image_filepaths = []
         for file in os.listdir(os.path.join(self.deployments_dir, deployment)):
