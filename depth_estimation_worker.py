@@ -24,6 +24,7 @@ from megadetector_onnx import MegaDetectorRuntime
 
 
 SEGMENTATION_RESIZE_FACTOR = 4
+OUTPUT_VISUALIZATION_RESIZE_FACTOR = 2
 
 # measured times in seconds used for progress bar, treat as relative though in case computer faster etc
 # megadetector load time is insignificant
@@ -384,12 +385,13 @@ class DepthEstimationWorker(QRunnable):
                         "sample_y": sample_y
                     })
 
-                # write results
+                # save results in memory
 
                 if len(output) == 0:
                     continue
 
                 self.main_window.csv_output_rows += output
+
 
                 # update the output csv
                 try:
@@ -404,8 +406,9 @@ class DepthEstimationWorker(QRunnable):
                     self.signals.message.emit("Failed to write output, please try running again.")
                     self.signals.stopped.emit()
                     return
-                
-                
+                    
+
+                    
                 # create output visualization
 
                 visualization_dir = os.path.join(self.root_path, "output_visualization", deployment)
@@ -414,6 +417,7 @@ class DepthEstimationWorker(QRunnable):
                 # label RGB image, once without segmentation mask and once with it
                 with Image.open(os.path.join(self.deployments_dir, deployment, image_basename)) as rgb_image:
                     cropped_rgb_image = self.main_window.crop_manager.crop(rgb_image, deployment)
+                    cropped_rgb_image = cropped_rgb_image.resize((cropped_rgb_image.width // OUTPUT_VISUALIZATION_RESIZE_FACTOR, cropped_rgb_image.height // OUTPUT_VISUALIZATION_RESIZE_FACTOR))
                     cropped_rgb_image_segmentation = cropped_rgb_image.copy()
 
                     # normal
@@ -424,6 +428,7 @@ class DepthEstimationWorker(QRunnable):
 
                     # with segmentation mask
                     animal_segmentation_mask_image = Image.fromarray((animal_mask_union * 255).astype(np.uint8)).convert("L")
+                    animal_segmentation_mask_image = animal_segmentation_mask_image.resize((animal_segmentation_mask_image.width // OUTPUT_VISUALIZATION_RESIZE_FACTOR, animal_segmentation_mask_image.height // OUTPUT_VISUALIZATION_RESIZE_FACTOR))
                     cropped_rgb_image_segmentation.paste("yellow", (0,0), animal_segmentation_mask_image)
                     for row in output:
                         self.draw_annotations(cropped_rgb_image_segmentation, row)
@@ -433,6 +438,7 @@ class DepthEstimationWorker(QRunnable):
                 
                 # label depth image
                 depth_image = Image.fromarray(colorize(depth)).convert("RGB")
+                depth_image = depth_image.resize((depth_image.width // OUTPUT_VISUALIZATION_RESIZE_FACTOR, depth_image.height // OUTPUT_VISUALIZATION_RESIZE_FACTOR))
                 for row in output:
                     self.draw_annotations(depth_image, row)
                 name, ext = os.path.splitext(image_basename)
@@ -568,24 +574,26 @@ class DepthEstimationWorker(QRunnable):
 
 
     def draw_annotations(self, image, row):
+        resize = OUTPUT_VISUALIZATION_RESIZE_FACTOR
+
         draw = ImageDraw.Draw(image)
                 
-        top_left = (int(row['bbox_x']), int(row['bbox_y']))
-        bottom_right = (top_left[0] + int(row['bbox_width']), top_left[1] + int(row['bbox_height']))
-        draw.rectangle((top_left, bottom_right), outline="red", width=3)
+        top_left = (int(row['bbox_x'])//resize, int(row['bbox_y'])//resize)
+        bottom_right = (top_left[0] + int(row['bbox_width'])//resize, top_left[1] + int(row['bbox_height'])//resize)
+        draw.rectangle((top_left, bottom_right), outline="red", width=5//resize)
 
-        radius = 10
-        sample_top_left = (int(row['sample_x'])-radius, int(row['sample_y'])-radius)
-        sample_bottom_right = (int(row['sample_x'])+radius, int(row['sample_y'])+radius)
-        draw.arc((sample_top_left, sample_bottom_right), 0, 360, fill="red", width=5)
+        radius = 10 // resize
+        sample_top_left = (int(row['sample_x'])//resize - radius, int(row['sample_y'])//resize - radius)
+        sample_bottom_right = (int(row['sample_x'])//resize + radius, int(row['sample_y'])//resize + radius)
+        draw.arc((sample_top_left, sample_bottom_right), 0, 360, fill="red", width=5//resize)
 
         distance = round(float(row['animal_distance']), ndigits=1)
         text = f"{distance} m"
         
         if platform.system() == 'Darwin':       # macOS
-            font = ImageFont.truetype("Arial.ttf", size=24)
+            font = ImageFont.truetype("Arial.ttf", size=36//resize)
         else:    # Windows, hopefully works on linux???
-            font = ImageFont.truetype("arial.ttf", size=24)
+            font = ImageFont.truetype("arial.ttf", size=36//resize)
         
         bbox = draw.textbbox(top_left, text, font=font)
         draw.rectangle(bbox, fill="black")
