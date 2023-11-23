@@ -323,10 +323,11 @@ class DepthEstimationWorker(QRunnable):
                     b = detection["bbox"]
                     h = depth.shape[0]
                     w = depth.shape[1]
-                    bbox_x = int(w*b[0])
-                    bbox_y = int(h*b[1])
-                    bbox_w = int(w*b[2])
-                    bbox_h = int(h*b[3])
+                    # clamp bbox pixel coords to sides of image, very occasionally megadetector will give results barely outside of the interval [0,1]
+                    bbox_x = int(max(w*b[0], 0))
+                    bbox_y = int(max(h*b[1], 0))
+                    bbox_w = int(min(w*b[2], w))
+                    bbox_h = int(min(h*b[3], h))
                     bbox_depth = depth[bbox_y:bbox_y+bbox_h, bbox_x:bbox_x+bbox_w]
 
 
