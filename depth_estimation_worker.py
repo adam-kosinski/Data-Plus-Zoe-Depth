@@ -17,6 +17,7 @@ import imagesize
 from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
 from PyQt6.QtWidgets import QMessageBox
 
+from torch import cuda
 from zoe_worker import build_zoedepth_model
 from zoedepth.utils.misc import save_raw_16bit, colorize
 
@@ -278,10 +279,14 @@ class DepthEstimationWorker(QRunnable):
                     # run zoedepth to get depth, save raw file
                     # load zoedepth if this is the first time we're using it
                     if not self.main_window.zoedepth_model:
+                        
                         print("Loading ZoeDepth")
                         self.signals.message.emit("Building depth model")
                         self.main_window.zoedepth_model = build_zoedepth_model()
+                        DEVICE = "cuda" if cuda.is_available() else "cpu"
+                        self.main_window.zoedepth_model = self.main_window.zoedepth_model.to(DEVICE)
                         self.increment_progress(ZOEDEPTH_BUILD_TIME)
+
                         if self.stop_requested:
                             self.signals.message.emit("Stopped")
                             self.signals.stopped.emit()
