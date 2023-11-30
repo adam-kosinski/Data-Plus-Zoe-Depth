@@ -12,10 +12,12 @@ from r_pca import R_pca
 import random
 import platform
 from datetime import datetime, timedelta
+import imagesize
 
 from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
 from PyQt6.QtWidgets import QMessageBox
 
+from torch import cuda
 from zoe_worker import build_zoedepth_model
 from zoedepth.utils.misc import save_raw_16bit, colorize
 
@@ -23,6 +25,7 @@ from megadetector_onnx import MegaDetectorRuntime
 
 
 SEGMENTATION_RESIZE_FACTOR = 4
+OUTPUT_VISUALIZATION_RESIZE_FACTOR = 2
 
 # measured times in seconds used for progress bar, treat as relative though in case computer faster etc
 # megadetector load time is insignificant
@@ -95,32 +98,47 @@ class DepthEstimationWorker(QRunnable):
         self.progress = 0   # 0-100
 
 
+
+
         # check that all images are the same dimensions in each deployment
-        self.signals.message.emit("Checking image dimensions")
-        for deployment in self.calibration_json:
+        # doing this also tests whether we can open the images (in case of corruption etc.)
+
+        for i, deployment in enumerate(self.calibration_json):
+            if self.stop_requested:
+                self.signals.message.emit("Stopped")
+                self.signals.stopped.emit()
+                return
+            
+            self.signals.message.emit(f"Checking image dimensions, deployment {i+1}/{len(self.calibration_json)}: {deployment}")
             first_image_filepath = None
             first_image_width = None
             first_image_height = None
 
             image_filepaths = self.get_image_filepaths(deployment)
+
             for filepath in image_filepaths:
-                with Image.open(filepath) as image:
-                    if not first_image_width:
-                        first_image_filepath = filepath
-                        first_image_width = image.size[0]
-                        first_image_height = image.size[1]
-                    elif image.size[0] != first_image_width or image.size[1] != first_image_height:
-                        self.signals.warning_popup.emit("Image Sizes Do Not Match", f"The following images in deployment '{deployment}' have different sizes:\n\n{first_image_filepath}: {first_image_width} x {first_image_height}\n{filepath}: {image.size[0]} x {image.size[1]}\n\nAll images in a deployment must have the same dimensions for automatic cropping and segmentation to work properly. Please correct this and then click 'Run Distance Estimation' again.")
-                        self.signals.message.emit(f"Images in deployment '{deployment}' not all the same size, please fix and try running again.")
-                        self.signals.stopped.emit()
-                        return
+                try:
+                    width, height = imagesize.get(filepath)
+                    if width == -1 or height == -1:
+                        raise Exception("Image dimensions failed to be read") # really just to trigger the except block below
+                except:
+                    self.signals.warning_popup.emit("Failed to Read Image", f"Failed to read the image:\n{filepath}\n\nPlease remove this file or fix issues with it, and then click 'Run Depth Estimation' again.")
+                    self.signals.message.emit(f"Failed to read {filepath}, please fix or remove the file and try running again.")
+                    self.signals.stopped.emit()
+                    return
+
+                if not first_image_width:
+                    first_image_filepath = filepath
+                    first_image_width = width
+                    first_image_height = height
+                elif width != first_image_width or height != first_image_height:
+                    self.signals.warning_popup.emit("Image Sizes Do Not Match", f"The following images in deployment '{deployment}' have different sizes:\n\n{first_image_filepath}: {first_image_width} x {first_image_height}\n{filepath}: {width} x {height}\n\nAll images in a deployment must have the same dimensions for automatic cropping and segmentation to work properly. Please correct this and then click 'Run Distance Estimation' again.")
+                    self.signals.message.emit(f"Images in deployment '{deployment}' not all the same size, please fix and try running again.")
+                    self.signals.stopped.emit()
+                    return
 
 
 
-
-        detections_dir = os.path.join(self.root_path, "detections")
-        os.makedirs(detections_dir, exist_ok=True)
-  
 
         # if zoedepth was already built, reflect that in the progress bar
         if self.main_window.zoedepth_model:
@@ -129,7 +147,13 @@ class DepthEstimationWorker(QRunnable):
         self.signals.message.emit("Loading MegaDetector v5a model")
         megadetector_runtime = MegaDetectorRuntime()
 
-        # run the pipeline for each calibrated deployment
+
+
+
+        # run the pipeline for each calibrated deployment ===================================================
+
+        detections_dir = os.path.join(self.root_path, "detections")
+        os.makedirs(detections_dir, exist_ok=True)
 
         for deployment in self.calibration_json:
             image_filepaths = self.get_image_filepaths(deployment)
@@ -193,6 +217,7 @@ class DepthEstimationWorker(QRunnable):
             # to prepare for segmentation, organize images into sets, the segmentation algorithm will run on one of these sets at a time
             # (using two dicts as indices to convert back and forth between set id and file basenames)
             # see self.get_segmentation_sets() for more details
+            self.signals.message.emit(f"{deployment} - finding sets of similar images by date/time taken (for segmentation)")
             basename_to_set, set_to_basenames = self.get_segmentation_sets(deployment)
 
             # deployment-level depth prep
@@ -263,10 +288,14 @@ class DepthEstimationWorker(QRunnable):
                     # run zoedepth to get depth, save raw file
                     # load zoedepth if this is the first time we're using it
                     if not self.main_window.zoedepth_model:
+                        
                         print("Loading ZoeDepth")
                         self.signals.message.emit("Building depth model")
                         self.main_window.zoedepth_model = build_zoedepth_model()
+                        DEVICE = "cuda" if cuda.is_available() else "cpu"
+                        self.main_window.zoedepth_model = self.main_window.zoedepth_model.to(DEVICE)
                         self.increment_progress(ZOEDEPTH_BUILD_TIME)
+
                         if self.stop_requested:
                             self.signals.message.emit("Stopped")
                             self.signals.stopped.emit()
@@ -308,10 +337,11 @@ class DepthEstimationWorker(QRunnable):
                     b = detection["bbox"]
                     h = depth.shape[0]
                     w = depth.shape[1]
-                    bbox_x = int(w*b[0])
-                    bbox_y = int(h*b[1])
-                    bbox_w = int(w*b[2])
-                    bbox_h = int(h*b[3])
+                    # clamp bbox pixel coords to sides of image, very occasionally megadetector will give results barely outside of the interval [0,1]
+                    bbox_x = int(max(w*b[0], 0))
+                    bbox_y = int(max(h*b[1], 0))
+                    bbox_w = int(min(w*b[2], w))
+                    bbox_h = int(min(h*b[3], h))
                     bbox_depth = depth[bbox_y:bbox_y+bbox_h, bbox_x:bbox_x+bbox_w]
 
 
@@ -370,12 +400,13 @@ class DepthEstimationWorker(QRunnable):
                         "sample_y": sample_y
                     })
 
-                # write results
+                # save results in memory
 
                 if len(output) == 0:
                     continue
 
                 self.main_window.csv_output_rows += output
+
 
                 # update the output csv
                 try:
@@ -390,8 +421,9 @@ class DepthEstimationWorker(QRunnable):
                     self.signals.message.emit("Failed to write output, please try running again.")
                     self.signals.stopped.emit()
                     return
-                
-                
+                    
+
+                    
                 # create output visualization
 
                 visualization_dir = os.path.join(self.root_path, "output_visualization", deployment)
@@ -400,6 +432,7 @@ class DepthEstimationWorker(QRunnable):
                 # label RGB image, once without segmentation mask and once with it
                 with Image.open(os.path.join(self.deployments_dir, deployment, image_basename)) as rgb_image:
                     cropped_rgb_image = self.main_window.crop_manager.crop(rgb_image, deployment)
+                    cropped_rgb_image = cropped_rgb_image.resize((cropped_rgb_image.width // OUTPUT_VISUALIZATION_RESIZE_FACTOR, cropped_rgb_image.height // OUTPUT_VISUALIZATION_RESIZE_FACTOR))
                     cropped_rgb_image_segmentation = cropped_rgb_image.copy()
 
                     # normal
@@ -410,6 +443,7 @@ class DepthEstimationWorker(QRunnable):
 
                     # with segmentation mask
                     animal_segmentation_mask_image = Image.fromarray((animal_mask_union * 255).astype(np.uint8)).convert("L")
+                    animal_segmentation_mask_image = animal_segmentation_mask_image.resize((animal_segmentation_mask_image.width // OUTPUT_VISUALIZATION_RESIZE_FACTOR, animal_segmentation_mask_image.height // OUTPUT_VISUALIZATION_RESIZE_FACTOR))
                     cropped_rgb_image_segmentation.paste("yellow", (0,0), animal_segmentation_mask_image)
                     for row in output:
                         self.draw_annotations(cropped_rgb_image_segmentation, row)
@@ -419,6 +453,7 @@ class DepthEstimationWorker(QRunnable):
                 
                 # label depth image
                 depth_image = Image.fromarray(colorize(depth)).convert("RGB")
+                depth_image = depth_image.resize((depth_image.width // OUTPUT_VISUALIZATION_RESIZE_FACTOR, depth_image.height // OUTPUT_VISUALIZATION_RESIZE_FACTOR))
                 for row in output:
                     self.draw_annotations(depth_image, row)
                 name, ext = os.path.splitext(image_basename)
@@ -438,6 +473,7 @@ class DepthEstimationWorker(QRunnable):
     
 
     def get_image_filepaths(self, deployment):
+        # returns absolute paths of image files in a deployment
         # useful for filtering for images only, and counting # images
         image_filepaths = []
         for file in os.listdir(os.path.join(self.deployments_dir, deployment)):
@@ -553,24 +589,26 @@ class DepthEstimationWorker(QRunnable):
 
 
     def draw_annotations(self, image, row):
+        resize = OUTPUT_VISUALIZATION_RESIZE_FACTOR
+
         draw = ImageDraw.Draw(image)
                 
-        top_left = (int(row['bbox_x']), int(row['bbox_y']))
-        bottom_right = (top_left[0] + int(row['bbox_width']), top_left[1] + int(row['bbox_height']))
-        draw.rectangle((top_left, bottom_right), outline="red", width=3)
+        top_left = (int(row['bbox_x'])//resize, int(row['bbox_y'])//resize)
+        bottom_right = (top_left[0] + int(row['bbox_width'])//resize, top_left[1] + int(row['bbox_height'])//resize)
+        draw.rectangle((top_left, bottom_right), outline="red", width=5//resize)
 
-        radius = 10
-        sample_top_left = (int(row['sample_x'])-radius, int(row['sample_y'])-radius)
-        sample_bottom_right = (int(row['sample_x'])+radius, int(row['sample_y'])+radius)
-        draw.arc((sample_top_left, sample_bottom_right), 0, 360, fill="red", width=5)
+        radius = 10 // resize
+        sample_top_left = (int(row['sample_x'])//resize - radius, int(row['sample_y'])//resize - radius)
+        sample_bottom_right = (int(row['sample_x'])//resize + radius, int(row['sample_y'])//resize + radius)
+        draw.arc((sample_top_left, sample_bottom_right), 0, 360, fill="red", width=5//resize)
 
         distance = round(float(row['animal_distance']), ndigits=1)
         text = f"{distance} m"
         
         if platform.system() == 'Darwin':       # macOS
-            font = ImageFont.truetype("Arial.ttf", size=24)
+            font = ImageFont.truetype("Arial.ttf", size=36//resize)
         else:    # Windows, hopefully works on linux???
-            font = ImageFont.truetype("arial.ttf", size=24)
+            font = ImageFont.truetype("arial.ttf", size=36//resize)
         
         bbox = draw.textbbox(top_left, text, font=font)
         draw.rectangle(bbox, fill="black")
