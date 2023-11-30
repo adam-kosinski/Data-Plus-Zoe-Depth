@@ -202,12 +202,21 @@ class DepthEstimationWorker(QRunnable):
 
             
 
+
             # progress bar stuff - pretend that we got our estimates right before, to make sure time adds up
             orig_estimated_zoedepth_time = len(image_filepaths) * TYPICAL_FRACTION_OF_IMAGES_WITH_ANIMALS * ZOEDEPTH_INFER_TIME_PER_IMAGE
             orig_estimated_segmentation_time = len(image_filepaths) * TYPICAL_FRACTION_OF_IMAGES_WITH_ANIMALS * SEGMENTATION_TIME_PER_IMAGE
             n_images_with_animals = len(detections_dict.keys())
-            adjusted_zoedepth_time_per_animal_image = orig_estimated_zoedepth_time / n_images_with_animals
-            adjusted_segmentation_time_per_animal_image = orig_estimated_segmentation_time / n_images_with_animals
+
+            if(n_images_with_animals == 0):
+                # avoid dividing by zero, and increment the progress that we would have shown if we had gone in the for loop
+                self.increment_progress(orig_estimated_zoedepth_time)
+                self.increment_progress(orig_estimated_segmentation_time)
+            else:
+                adjusted_zoedepth_time_per_animal_image = orig_estimated_zoedepth_time / n_images_with_animals
+                adjusted_segmentation_time_per_animal_image = orig_estimated_segmentation_time / n_images_with_animals
+
+
 
             # iterate through files with animals detected
 
