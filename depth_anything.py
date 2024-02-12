@@ -62,7 +62,7 @@ import argparse
 import cv2
 import numpy as np
 import onnxruntime as ort  # version 1.16.3 was tested
-from os.path import splitext
+import os
 from PIL import Image
 import warnings
 
@@ -358,11 +358,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=str,
-        required=True,
+        required=False,
         help="Path to ONNX model.",
     )
     parser.add_argument(
-        "--depth_path",
+        "-o", "--output",
         type=str,
         required=False,
         help="Path to store raw depth file."
@@ -371,38 +371,47 @@ def parse_args() -> argparse.Namespace:
 
 
 
-def infer(pil_img, model: str, depth_path: str = None):
-    assert depth_path is None or splitext(depth_path)[1] == ".png", "depth_path must end in .png"
-
-    image, (orig_h, orig_w) = load_pil_image(pil_img)
-
-    # set up onnx inference session, suppress warning that CUDA isn't present
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        session = ort.InferenceSession(model, providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+class DepthAnythingRuntime:
+    def __init__(self, model_path=None):
+        if model_path is None:
+            basedir = os.path.dirname(__file__)
+            model_path = os.path.join(basedir, "./depth_anything_vits14.onnx")
+        # set up onnx inference session, suppress warning that CUDA isn't present
+        print("Loading DepthAnything runtime")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.inference_session = ort.InferenceSession(model_path, providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+        print("DepthAnything runtime ready")
     
-    # run model
-    disparity = session.run(None, {"image": image})[0]
-    disparity = cv2.resize(disparity[0, 0], (orig_w, orig_h))
-
-    # convert zero or near-zero disparities to a small number, so we don't get infinity when converting to depth
-    min_allowed_disparity = np.percentile(disparity[disparity != 0], 5)
-    disparity[disparity < min_allowed_disparity] = min_allowed_disparity
-    depth = 10/disparity  # 10 is arbitrary, get close-ish to the meter scale
     
-    # save colored depth to a file
-    if depth_path is not None:
-        if depth.max() != depth.min():
-            scaled_depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
-        else:
-            scaled_depth = depth * 0.0  # avoid divide by zero
-        scaled_depth = scaled_depth.astype(np.uint8)
-        Image.fromarray(scaled_depth).save(depth_path)
+    def run(self, pil_img, save_path=None):
+        assert save_path is None or os.path.splitext(save_path)[1] == ".png", "depth_path must end in .png"
 
-    return depth
+        image, (orig_h, orig_w) = load_pil_image(pil_img)
+        
+        # run model
+        disparity = self.inference_session.run(None, {"image": image})[0]
+        disparity = cv2.resize(disparity[0, 0], (orig_w, orig_h))
+
+        # convert zero or near-zero disparities to a small number, so we don't get infinity when converting to depth
+        min_allowed_disparity = np.percentile(disparity[disparity != 0], 5)
+        disparity[disparity < min_allowed_disparity] = min_allowed_disparity
+        depth = 10/disparity  # 10 is arbitrary, get close-ish to the meter scale
+        
+        # save colored depth to a file
+        if save_path is not None:
+            if depth.max() != depth.min():
+                scaled_depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
+            else:
+                scaled_depth = depth * 0.0  # avoid divide by zero
+            scaled_depth = scaled_depth.astype(np.uint8)
+            Image.fromarray(255-scaled_depth).save(save_path)
+
+        return depth
 
 
 if __name__ == "__main__":
     args = parse_args()
-    with Image.open(args.img) as pil_image:
-        infer(pil_image, args.model, args.depth_path)
+    depth_anything_runtime = DepthAnythingRuntime(args.model)
+    with Image.open(args.img).convert("RGB") as pil_image:
+        depth_anything_runtime.run(pil_image, save_path=args.output)

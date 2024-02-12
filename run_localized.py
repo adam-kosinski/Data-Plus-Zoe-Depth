@@ -8,7 +8,7 @@ from zoedepth.utils.misc import colorize
 from zoedepth.utils.config import get_config
 from zoedepth.models.builder import build_model
 
-import depth_anything
+from depth_anything import DepthAnythingRuntime
 
 import matplotlib.pyplot as plt
 
@@ -36,6 +36,9 @@ with open(args.bbox_file) as json_data:
 # ##### prediction
 # DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # zoe = model_zoe_nk.to(DEVICE)
+
+depth_anything_runtime = DepthAnythingRuntime()
+
 
 # create output dir if necessary
 if not os.path.exists("./output"):
@@ -78,7 +81,7 @@ for file in os.listdir(args.input_dir):
                 break
         else:
             # depth = zoe.infer_pil(img)  # as numpy
-            depth = depth_anything.infer(img, "depth_anything_vits14.onnx")     
+            depth = depth_anything_runtime.run(img)     
 
         print("Processing animal area")
         
@@ -105,7 +108,7 @@ for file in os.listdir(args.input_dir):
 
             # do inference
             # local_depth = zoe.infer_pil(local_img)
-            local_depth = depth_anything.infer(local_img, "depth_anything_vits14.onnx") 
+            local_depth = depth_anything_runtime.run(local_img) 
 
             # get copy of global depth
             depth_copy = depth.copy()
