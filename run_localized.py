@@ -8,6 +8,8 @@ from zoedepth.utils.misc import colorize
 from zoedepth.utils.config import get_config
 from zoedepth.models.builder import build_model
 
+import depth_anything
+
 import matplotlib.pyplot as plt
 
 # get input dir
@@ -23,17 +25,17 @@ with open(args.bbox_file) as json_data:
     bbox_json = json.load(json_data)
 
 # Zoe_NK
-if args.pretrained_resource:
-    overwrite = {"pretrained_resource": args.pretrained_resource}
-    config = get_config("zoedepth_nk", "infer", None, **overwrite)
-    model_zoe_nk = build_model(config)
-else:
-    model_zoe_nk = torch.hub.load(".", "ZoeD_NK", source="local", pretrained=True, config_mode="eval")
+# if args.pretrained_resource:
+#     overwrite = {"pretrained_resource": args.pretrained_resource}
+#     config = get_config("zoedepth_nk", "infer", None, **overwrite)
+#     model_zoe_nk = build_model(config)
+# else:
+#     model_zoe_nk = torch.hub.load(".", "ZoeD_NK", source="local", pretrained=True, config_mode="eval")
 
 
-##### prediction
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-zoe = model_zoe_nk.to(DEVICE)
+# ##### prediction
+# DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# zoe = model_zoe_nk.to(DEVICE)
 
 # create output dir if necessary
 if not os.path.exists("./output"):
@@ -75,8 +77,8 @@ for file in os.listdir(args.input_dir):
                     depth = np.asarray(depth_img) / 256
                 break
         else:
-            depth = zoe.infer_pil(img)  # as numpy
-        
+            # depth = zoe.infer_pil(img)  # as numpy
+            depth = depth_anything.infer(img, "depth_anything_vits14.onnx")     
 
         print("Processing animal area")
         
@@ -102,12 +104,13 @@ for file in os.listdir(args.input_dir):
             local_img = img.crop(padded_box)
 
             # do inference
-            local_depth = zoe.infer_pil(local_img)
+            # local_depth = zoe.infer_pil(local_img)
+            local_depth = depth_anything.infer(local_img, "depth_anything_vits14.onnx") 
 
             # get copy of global depth
             depth_copy = depth.copy()
 
-            # align the depths using the padding area
+            # create local and global masks for alignment
             local_mask = np.zeros(local_depth.shape, dtype='bool')
             b_offset = {
                 'top': b['y'] - padded_box[1],
@@ -118,9 +121,10 @@ for file in os.listdir(args.input_dir):
             local_mask[b_offset['top']:b_offset['bottom'], b_offset['left']:b_offset['right']] = True
             global_mask = np.ones(depth.shape, dtype='bool')
             global_mask[padded_box[1]:padded_box[3], padded_box[0]:padded_box[2]] = local_mask
+
+            # align local depth
             L = local_depth[~local_mask]
             D = depth_copy[~global_mask]
-
             local_depth = ((local_depth - L.mean()) / L.std()) * D.std() + D.mean()
             local_depth = np.maximum(local_depth, 0)
 

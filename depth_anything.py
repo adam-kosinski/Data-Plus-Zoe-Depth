@@ -64,6 +64,7 @@ import numpy as np
 import onnxruntime as ort  # version 1.16.3 was tested
 from os.path import splitext
 from PIL import Image
+import warnings
 
 
 
@@ -375,11 +376,19 @@ def infer(pil_img, model: str, depth_path: str = None):
 
     image, (orig_h, orig_w) = load_pil_image(pil_img)
 
-    session = ort.InferenceSession(
-        model, providers=["CUDAExecutionProvider", "CPUExecutionProvider"]
-    )
-    depth = session.run(None, {"image": image})[0]
-    depth = cv2.resize(depth[0, 0], (orig_w, orig_h))
+    # set up onnx inference session, suppress warning that CUDA isn't present
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        session = ort.InferenceSession(model, providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+    
+    # run model
+    disparity = session.run(None, {"image": image})[0]
+    disparity = cv2.resize(disparity[0, 0], (orig_w, orig_h))
+
+    # convert zero or near-zero disparities to a small number, so we don't get infinity when converting to depth
+    min_allowed_disparity = np.percentile(disparity[disparity != 0], 5)
+    disparity[disparity < min_allowed_disparity] = min_allowed_disparity
+    depth = 10/disparity  # 10 is arbitrary, get close-ish to the meter scale
     
     # save colored depth to a file
     if depth_path is not None:
@@ -396,4 +405,4 @@ def infer(pil_img, model: str, depth_path: str = None):
 if __name__ == "__main__":
     args = parse_args()
     with Image.open(args.img) as pil_image:
-        infer(pil_image, args.model, args.depth_path, args.colored_path)
+        infer(pil_image, args.model, args.depth_path)
